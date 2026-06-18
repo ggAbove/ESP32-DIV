@@ -12,14 +12,32 @@
 #endif
 #define TFT_BLACK FEATURE_BG
 
-// NRF24 jammer transmit power. Three radios running a constant carrier at
-// RF24_PA_MAX draw enough current (especially on PA+LNA modules) to sag the
-// supply rail — the screen dims and the ESP32 brownout-resets. RF24_PA_LOW keeps
-// all three channels jammed at short range without the brownout. Raise to
-// RF24_PA_HIGH / RF24_PA_MAX only on a strong supply (good USB, not battery).
+// NRF24 jammer transmit power. Three radios on a constant carrier at RF24_PA_MAX
+// draw a lot of current (>=100mA each on PA+LNA modules) and sag the supply rail.
+// Max power is kept for range; to stop the sag from brown-out-resetting the chip,
+// the brownout detector is disabled *only while the jammer is on* (jammerSetBrownout
+// below) and restored on exit. The screen may still dim slightly under load — that
+// is the rail sagging, unavoidable at max TX power, but it no longer resets.
+// Drop to RF24_PA_HIGH/LOW (e.g. -D JAMMER_PA_LEVEL=RF24_PA_LOW) to reduce the dim.
 #ifndef JAMMER_PA_LEVEL
-#define JAMMER_PA_LEVEL RF24_PA_LOW
+#define JAMMER_PA_LEVEL RF24_PA_MAX
 #endif
+
+// Scoped brownout-detector control: kill the reset while the high-current jammer
+// runs, restore normal protection afterwards (so SD writes etc. stay protected).
+#include "soc/rtc_cntl_reg.h"
+static uint32_t s_jamBrownSaved = 0;
+static bool s_jamBrownOff = false;
+static inline void jammerSetBrownout(bool enabled) {
+  if (!enabled && !s_jamBrownOff) {
+    s_jamBrownSaved = READ_PERI_REG(RTC_CNTL_BROWN_OUT_REG);
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // disable brownout reset
+    s_jamBrownOff = true;
+  } else if (enabled && s_jamBrownOff) {
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, s_jamBrownSaved);  // restore
+    s_jamBrownOff = false;
+  }
+}
 
 #ifndef FEATURE_TEXT
 #define FEATURE_TEXT ORANGE
@@ -1286,12 +1304,14 @@ void initializeRadiosMultiMode() {
 
 void initializeRadios() {
   if (jammerActive) {
+    jammerSetBrownout(false);  // high TX current sags the rail; don't reset on it
     initializeRadiosMultiMode();
 
   } else {
     radio1.powerDown();
     radio2.powerDown();
     radio3.powerDown();
+    jammerSetBrownout(true);   // restore normal brownout protection
   }
 }
 
@@ -3166,12 +3186,14 @@ void initializeRadiosMultiMode() {
 
 void initializeRadios() {
   if (jammerActive) {
+    jammerSetBrownout(false);  // high TX current sags the rail; don't reset on it
     initializeRadiosMultiMode();
 
   } else {
     radio1.powerDown();
     radio2.powerDown();
     radio3.powerDown();
+    jammerSetBrownout(true);   // restore normal brownout protection
   }
 }
 
@@ -3295,6 +3317,8 @@ void prokillLoop() {
 
   if (feature_active && (feature_exit_requested || isButtonPressed(BTN_SELECT) || featureExitButtonPressed())) {
     feature_exit_requested = true;
+    jammerActive = false;
+    initializeRadios();  // power down radios + restore brownout protection on exit
     return;
   }
 
