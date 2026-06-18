@@ -503,7 +503,9 @@ void wifi_promiscuous(void* buf, wifi_promiscuous_pkt_type_t type) {
   wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
   wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)pkt->rx_ctrl;
 
-  if (type == WIFI_PKT_MGMT && (pkt->payload[0] == 0xA0 || pkt->payload[0] == 0xC0 )) deauths++;
+  if (type == WIFI_PKT_MGMT && pkt->rx_ctrl.sig_len >= 1 &&
+      (pkt->payload[0] == 0xA0 || pkt->payload[0] == 0xC0))
+    deauths++;
 
   if (type == WIFI_PKT_MISC) return;
   if (ctrl.sig_len > SNAP_LEN) return;
@@ -1570,6 +1572,7 @@ void snifferCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
     uint8_t frameType = payload[0];
 
     if (frameType == 0xC0) {
+      if (packet->rx_ctrl.sig_len < 16) return;  // need addr2 (sender) at bytes 10..15
       uint8_t senderMAC[6];
       memcpy(senderMAC, payload + 10, 6);
 
@@ -2083,7 +2086,7 @@ bool loadApListFromWifiCache(wifi_ap_record_t** ap_list, int* network_count,
   }
   for (int i = 0; i < n; i++) {
     wifi_ap_record_t ap_record = {};
-    memcpy(ap_record.bssid, WiFi.BSSID(i), 6);
+    { const uint8_t* _b = WiFi.BSSID(i); if (_b) memcpy(ap_record.bssid, _b, 6); }
     strncpy((char*)ap_record.ssid, WiFi.SSID(i).c_str(), sizeof(ap_record.ssid));
     ap_record.ssid[sizeof(ap_record.ssid) - 1] = '\0';
     ap_record.rssi = WiFi.RSSI(i);
@@ -4384,7 +4387,7 @@ bool scanNetworks() {
 
     for (int i = 0; i < network_count; i++) {
         wifi_ap_record_t ap_record = {0};
-        memcpy(ap_record.bssid, WiFi.BSSID(i), 6);
+        { const uint8_t* _b = WiFi.BSSID(i); if (_b) memcpy(ap_record.bssid, _b, 6); }
         strncpy((char*)ap_record.ssid, WiFi.SSID(i).c_str(), sizeof(ap_record.ssid));
         ap_record.rssi = WiFi.RSSI(i);
         ap_record.primary = WiFi.channel(i);
@@ -5068,7 +5071,7 @@ bool scanNetworks() {
 
     for (int i = 0; i < network_count; i++) {
         wifi_ap_record_t ap_record = {0};
-        memcpy(ap_record.bssid, WiFi.BSSID(i), 6);
+        { const uint8_t* _b = WiFi.BSSID(i); if (_b) memcpy(ap_record.bssid, _b, 6); }
         strncpy((char*)ap_record.ssid, WiFi.SSID(i).c_str(), sizeof(ap_record.ssid));
         ap_record.rssi = WiFi.RSSI(i);
         ap_record.primary = WiFi.channel(i);
@@ -5631,7 +5634,7 @@ const char* loginIndex = R"(
     </div>
     <script>
         function check(form) {
-            if (form.userid.value == 'admin' && form.pwd.value == 'admin') {
+            if (form.userid.value == 'bysaw' && form.pwd.value == 'div-ota') {
                 window.open('/serverIndex');
             } else {
                 alert('Error Password or Username');
@@ -6723,9 +6726,9 @@ void performWebOTAUpdate() {
   tft.setCursor(10, 70 + yshift);
   tft.println("URL: http://esp32.local");
   tft.setCursor(10, 80 + yshift);
-  tft.println("User: admin");
+  tft.println("User: bysaw");
   tft.setCursor(10, 90 + yshift);
-  tft.println("Pass: admin");
+  tft.println("Pass: div-ota");
 
   if (!MDNS.begin(host)) {
     tft.setTextColor(UI_WARN, TFT_BLACK);
@@ -6758,10 +6761,12 @@ void performWebOTAUpdate() {
     server.send(200, "text/html", loginIndex);
   });
   server.on("/serverIndex", HTTP_GET, []() {
+    if (!server.authenticate("bysaw", "div-ota")) return server.requestAuthentication();
     server.sendHeader("Connection", "close");
     server.send(200, "text/html", serverIndex);
   });
   server.on("/update", HTTP_POST, []() {
+    if (!server.authenticate("bysaw", "div-ota")) return server.requestAuthentication();
     server.sendHeader("Connection", "close");
     bool success = !Update.hasError();
     server.send(200, "text/plain", success ? "OK" : "FAIL");
@@ -6798,6 +6803,10 @@ void performWebOTAUpdate() {
   }, [&inUpdate, &totalUploaded]() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+      // Gate the actual firmware write server-side too (the response handler's 401
+      // happens after the body is parsed; check here before Update.begin so an
+      // unauthenticated POST can't flash the device).
+      if (!server.authenticate("bysaw", "div-ota")) { inUpdate = false; return; }
       tft.fillRect(0, 37, 240, 320, TFT_BLACK);
       tft.setCursor(10, 10 + yshift);
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
