@@ -473,6 +473,13 @@ const float R1 = 100000.0;
 const float R2 = 100000.0;
 
 float readBatteryVoltage() {
+#if !defined(BATTERY_ADC_PIN) || (BATTERY_ADC_PIN < 0)
+  // No battery ADC on this board (V2/CYD are USB-powered; charge state, if any,
+  // lives in the IP5306 over I2C, not on an ADC divider). Calling analogRead(-1)
+  // only floods "Pin 255 is not ADC pin!" and blocks 50 ms per status-bar refresh.
+  // Return a sentinel so the UI shows "USB" instead of a fake 0%.  (fixes #147/#125)
+  return -1.0f;
+#else
   const int sampleCount = 10;
   long sum = 0;
 
@@ -488,6 +495,7 @@ float readBatteryVoltage() {
   float outputVoltage = pinVoltage * 2.0;
 
   return outputVoltage;
+#endif
 }
 
 float readInternalTemperature() {
@@ -604,15 +612,18 @@ void drawStatusBar(float batteryVoltage, bool forceUpdate, bool bottomSeparator)
     tft.drawRoundRect(x, y, 22, 10, 2, TFT_WHITE);
     tft.fillRect(x + 22, y + 3, 2, 4, TFT_WHITE);
 
-    int batteryLevelWidth = ::map(batteryPercentage, 0, 100, 0, 20);
-    uint16_t batteryColor = (batteryPercentage > 20) ? TFT_GREEN : TFT_RED;
-    tft.fillRoundRect(x + 2, y + 2, batteryLevelWidth, 6, 1, batteryColor);
+    // batteryVoltage < 0 => board has no battery ADC (USB-powered). Show "USB"
+    // instead of a fake 0%/red bar.  (#147/#125)
+    bool noBattery = (batteryVoltage < 0.0f);
+    int batteryLevelWidth = noBattery ? 0 : ::map(batteryPercentage, 0, 100, 0, 20);
+    uint16_t batteryColor = noBattery ? TFT_DARKGREY : ((batteryPercentage > 20) ? TFT_GREEN : TFT_RED);
+    if (batteryLevelWidth > 0) tft.fillRoundRect(x + 2, y + 2, batteryLevelWidth, 6, 1, batteryColor);
 
     tft.setCursor(x + 30, y + 2);
     tft.setTextColor(TFT_GREEN, UI_LABLE);
     tft.setTextFont(1);
     tft.setTextSize(1);
-    tft.print(String(batteryPercentage) + "%");
+    tft.print(noBattery ? String("USB") : (String(batteryPercentage) + "%"));
 
     const int iconW         = 16;
     const int gap           = 3;
