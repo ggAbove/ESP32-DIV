@@ -196,6 +196,14 @@ void run() {
   esp_wifi_set_promiscuous_rx_cb(nullptr);
   if (s_q) { vQueueDelete(s_q); s_q = nullptr; }
 
+  // exit requested during harvest -> tear down here, don't fall into the flood
+  if (feature_exit_requested || featureExitButtonPressed()) {
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    if (s_csvOpen) { s_csv.flush(); s_csv.close(); s_csvOpen = false; }
+    Serial.println("[karma] exit during harvest");
+    return;
+  }
+
   // seed with common SSIDs if nothing was heard, so the flood is still useful
   if (s_count == 0) {
     for (size_t i = 0; i < sizeof(kCommon) / sizeof(kCommon[0]); i++)

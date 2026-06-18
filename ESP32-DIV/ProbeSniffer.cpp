@@ -19,6 +19,7 @@
 #include "freertos/queue.h"
 
 extern TFT_eSPI tft;
+extern bool feature_active;
 extern bool feature_exit_requested;
 bool featureExitButtonPressed();
 
@@ -125,6 +126,8 @@ static void draw() {
 }
 
 void run() {
+  feature_active = true;  // touch-nav SELECT (isTouchNavSlotDown) needs this set
+  feature_exit_requested = false;
   pauseBackgroundRadioTasks();
   s_total = 0;
   s_all = 0;

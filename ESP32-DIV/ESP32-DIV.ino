@@ -1040,7 +1040,7 @@ void handleWiFiSubmenuButtons() {
     if (isButtonPressed(BTN_UP)) {
         current_submenu_index = (current_submenu_index - 1 + active_submenu_size) % active_submenu_size;
         if (current_submenu_index < 0) {
-            current_submenu_index = NUM_SUBMENU_ITEMS - 1;
+            current_submenu_index = active_submenu_size - 1;
         }
         last_interaction_time = millis();
         displaySubmenu();
@@ -1049,7 +1049,7 @@ void handleWiFiSubmenuButtons() {
 
     if (isButtonPressed(BTN_DOWN)) {
         current_submenu_index = (current_submenu_index + 1) % active_submenu_size;
-        if (current_submenu_index >= NUM_SUBMENU_ITEMS) {
+        if (current_submenu_index >= active_submenu_size) {
             current_submenu_index = 0;
         }
         last_interaction_time = millis();
@@ -1068,6 +1068,7 @@ void handleWiFiSubmenuButtons() {
             displayMenu();
             handleButtons();
             is_main_menu = false;
+            return;  // don't fall through into the feature-launch blocks below
         }
 
         // bySaw custom tools occupy indices 7..NUM-2 (each is a self-contained run())
@@ -1606,7 +1607,7 @@ void handleBluetoothSubmenuButtons() {
     if (isButtonPressed(BTN_UP)) {
         current_submenu_index = (current_submenu_index - 1 + active_submenu_size) % active_submenu_size;
         if (current_submenu_index < 0) {
-            current_submenu_index = NUM_SUBMENU_ITEMS - 1;
+            current_submenu_index = active_submenu_size - 1;
         }
         last_interaction_time = millis();
         displaySubmenu();
@@ -1615,7 +1616,7 @@ void handleBluetoothSubmenuButtons() {
 
     if (isButtonPressed(BTN_DOWN)) {
         current_submenu_index = (current_submenu_index + 1) % active_submenu_size;
-        if (current_submenu_index >= NUM_SUBMENU_ITEMS) {
+        if (current_submenu_index >= active_submenu_size) {
             current_submenu_index = 0;
         }
         last_interaction_time = millis();
@@ -1634,6 +1635,7 @@ void handleBluetoothSubmenuButtons() {
             displayMenu();
             handleButtons();
             is_main_menu = false;
+            return;  // don't fall through into the idx==6/idx==0 launch blocks
         }
 
         if (current_submenu_index == 6) {  // BLE Tracker Scan
@@ -2050,7 +2052,7 @@ void handleNRFSubmenuButtons() {
     if (isButtonPressed(BTN_UP)) {
         current_submenu_index = (current_submenu_index - 1 + active_submenu_size) % active_submenu_size;
         if (current_submenu_index < 0) {
-            current_submenu_index = NUM_SUBMENU_ITEMS - 1;
+            current_submenu_index = active_submenu_size - 1;
         }
         last_interaction_time = millis();
         displaySubmenu();
@@ -2059,7 +2061,7 @@ void handleNRFSubmenuButtons() {
 
     if (isButtonPressed(BTN_DOWN)) {
         current_submenu_index = (current_submenu_index + 1) % active_submenu_size;
-        if (current_submenu_index >= NUM_SUBMENU_ITEMS) {
+        if (current_submenu_index >= active_submenu_size) {
             current_submenu_index = 0;
         }
         last_interaction_time = millis();
@@ -2250,7 +2252,7 @@ void handleSubGHzSubmenuButtons() {
     if (isButtonPressed(BTN_UP)) {
         current_submenu_index = (current_submenu_index - 1 + active_submenu_size) % active_submenu_size;
         if (current_submenu_index < 0) {
-            current_submenu_index = NUM_SUBMENU_ITEMS - 1;
+            current_submenu_index = active_submenu_size - 1;
         }
         last_interaction_time = millis();
         displaySubmenu();
@@ -2259,7 +2261,7 @@ void handleSubGHzSubmenuButtons() {
 
     if (isButtonPressed(BTN_DOWN)) {
         current_submenu_index = (current_submenu_index + 1) % active_submenu_size;
-        if (current_submenu_index >= NUM_SUBMENU_ITEMS) {
+        if (current_submenu_index >= active_submenu_size) {
             current_submenu_index = 0;
         }
         last_interaction_time = millis();

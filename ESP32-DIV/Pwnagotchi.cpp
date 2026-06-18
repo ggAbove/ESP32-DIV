@@ -16,6 +16,7 @@
 #include "freertos/queue.h"
 
 extern TFT_eSPI tft;
+extern bool feature_active;
 extern bool feature_exit_requested;
 bool featureExitButtonPressed();
 bool isButtonPressedEdge(int buttonPin);
@@ -293,6 +294,8 @@ static void drawStats() {
 }
 
 void run() {
+  feature_active = true;  // touch-nav SELECT (isTouchNavSlotDown) needs this set
+  feature_exit_requested = false;
   // Stop the boot WiFi/BLE background scanners — they periodically re-scan and
   // clobber our promiscuous mode (without this the sniffer sees 0 packets).
   pauseBackgroundRadioTasks();
