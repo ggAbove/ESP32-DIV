@@ -10,6 +10,7 @@
 
 extern TFT_eSPI tft;
 extern bool feature_exit_requested;
+extern bool feature_active;
 bool featureExitButtonPressed();
 
 namespace TVBGone {
@@ -60,6 +61,9 @@ static void sendOne(const Code &c) {
 }
 
 void run() {
+  Serial.println("[tvbgone] start");
+  feature_active = true;  // REQUIRED: touch-nav SELECT only registers when active
+  feature_exit_requested = false;
   s_ir.begin();
   tft.fillScreen(UI_BG);
   tft.setTextFont(1);
@@ -69,6 +73,9 @@ void run() {
   tft.setTextColor(UI_DIM_TEXT, UI_BG);
   tft.setTextSize(1);
   tft.drawCentreString("point IR at the TV", tft.width() / 2, 70, 1);
+  // persistent exit hint at the touch-nav SELECT slot (bottom centre)
+  tft.setTextColor(UI_OK, UI_BG);
+  tft.drawCentreString("SEL: exit", tft.width() / 2, tft.height() - 12, 1);
 
   int round = 0;
   while (!feature_exit_requested && !featureExitButtonPressed()) {
@@ -93,8 +100,6 @@ void run() {
       Serial.printf("[tvbgone] sent %s (%d/%d)\n", kCodes[i].brand, i + 1, N);
       for (int k = 0; k < 12 && !featureExitButtonPressed(); k++) delay(10);  // ~120ms gap
     }
-    tft.setTextColor(UI_DIM_TEXT, UI_BG);
-    tft.drawCentreString("sweep done - SEL exit", tft.width() / 2, tft.height() - 14, 1);
     for (int k = 0; k < 60 && !feature_exit_requested && !featureExitButtonPressed(); k++) delay(10);
   }
   Serial.println("[tvbgone] stopped");

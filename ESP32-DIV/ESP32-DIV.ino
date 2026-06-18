@@ -51,7 +51,7 @@ const unsigned char *bitmap_icons[NUM_MENU_ITEMS] = {
 int current_menu_index = 0;
 bool is_main_menu = false;
 
-const int NUM_SUBMENU_ITEMS = 12;
+const int NUM_SUBMENU_ITEMS = 10;
 const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Packet Monitor",
     "Beacon Spammer",
@@ -62,11 +62,9 @@ const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Captive Portal",
     "Pwnagotchi",
     "Probe Sniffer",
-    "BLE Tracker Scan",
-    "TV-B-Gone",
     "Back to Main Menu"};
 
-const int bluetooth_NUM_SUBMENU_ITEMS = 7;
+const int bluetooth_NUM_SUBMENU_ITEMS = 8;
 const char *bluetooth_submenu_items[bluetooth_NUM_SUBMENU_ITEMS] = {
     "BLE Jammer",
     "BLE Spoofer",
@@ -74,6 +72,7 @@ const char *bluetooth_submenu_items[bluetooth_NUM_SUBMENU_ITEMS] = {
     "Sniffer",
     "BLE Scanner",
     "BLE Rubber Ducky",
+    "Tracker Scan",
     "Back to Main Menu"};
 
 const int nrf_NUM_SUBMENU_ITEMS = 3;
@@ -128,11 +127,12 @@ const char *gps_submenu_items[gps_NUM_SUBMENU_ITEMS] = {
     "Satellite Scanner",
     "Back to Main Menu"};
 
-const int ir_NUM_SUBMENU_ITEMS = 4;
+const int ir_NUM_SUBMENU_ITEMS = 5;
 const char *ir_submenu_items[ir_NUM_SUBMENU_ITEMS] = {
     "Record",
     "Saved Profile",
     "Universal Controller",
+    "TV-B-Gone",
     "Back to Main Menu"};
 
 const int about_NUM_SUBMENU_ITEMS = 1;
@@ -162,8 +162,6 @@ const unsigned char *wifi_submenu_icons[NUM_SUBMENU_ITEMS] = {
     bitmap_icon_bash,
     bitmap_icon_eye2,
     bitmap_icon_antenna,
-    bitmap_icon_ble,
-    bitmap_icon_signal,
     bitmap_icon_go_back
 };
 
@@ -174,6 +172,7 @@ const unsigned char *bluetooth_submenu_icons[bluetooth_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_analyzer,
     bitmap_icon_graph,
     bitmap_icon_rubber_ducky,
+    bitmap_icon_ble,
     bitmap_icon_go_back
 };
 
@@ -227,6 +226,7 @@ const unsigned char *ir_submenu_icons[ir_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_led,
     bitmap_icon_list,
     bitmap_icon_remote_control,
+    bitmap_icon_signal,
     bitmap_icon_go_back
 };
 
@@ -598,8 +598,9 @@ void bySawConsolePoll() {
       if (cmd == "help") {
         Serial.println("cmds: help info heap state reason reboot | nav up/down/sel/left/right/esc");
       } else if (cmd == "state") {
-        Serial.printf("[state] menu=%d submenu=%d feature_active=%d heap=%u\n", current_menu_index,
-                      current_submenu_index, (int)feature_active, ESP.getFreeHeap());
+        Serial.printf("[state] menu=%d submenu=%d olayer=%d insub=%d feature_active=%d heap=%u\n",
+                      current_menu_index, current_submenu_index, (int)other_layer, (int)in_sub_menu,
+                      (int)feature_active, ESP.getFreeHeap());
       } else if (cmd == "info") {
         Serial.printf("[info] heap=%u min=%u uptime=%lus cpu=%dMHz reset=%s\n", ESP.getFreeHeap(),
                       ESP.getMinFreeHeap(), millis() / 1000, getCpuFrequencyMhz(),
@@ -1071,8 +1072,6 @@ void handleWiFiSubmenuButtons() {
             switch (current_submenu_index) {
                 case 7: Pwnagotchi::run(); break;
                 case 8: ProbeSniffer::run(); break;
-                case 9: TrackerScanner::run(); break;
-                case 10: TVBGone::run(); break;
                 default: break;
             }
             in_sub_menu = true;
@@ -1357,8 +1356,6 @@ void handleWiFiSubmenuButtons() {
                     switch (current_submenu_index) {
                         case 7: Pwnagotchi::run(); break;
                         case 8: ProbeSniffer::run(); break;
-                        case 9: TrackerScanner::run(); break;
-                        case 10: TVBGone::run(); break;
                         default: break;
                     }
                     in_sub_menu = true;
@@ -1624,13 +1621,29 @@ void handleBluetoothSubmenuButtons() {
         last_interaction_time = millis();
         delay(200);
 
-        if (current_submenu_index == 6) {
+        if (current_submenu_index == 7) {  // Back (last item)
             in_sub_menu = false;
             feature_active = false;
             feature_exit_requested = false;
             displayMenu();
             handleButtons();
             is_main_menu = false;
+        }
+
+        if (current_submenu_index == 6) {  // BLE Tracker Scan
+            in_sub_menu = true;
+            feature_active = true;
+            feature_exit_requested = false;
+            TrackerScanner::run();
+            in_sub_menu = true;
+            is_main_menu = false;
+            submenu_initialized = false;
+            feature_active = false;
+            feature_exit_requested = false;
+            displaySubmenu();
+            delay(200);
+            while (isButtonPressed(BTN_SELECT)) {
+            }
         }
 
         if (current_submenu_index == 0) {
@@ -1835,13 +1848,25 @@ void handleBluetoothSubmenuButtons() {
                 displaySubmenu();
                 delay(200);
 
-                if (current_submenu_index == 6) {
+                if (current_submenu_index == 7) {  // Back (last item)
                     in_sub_menu = false;
                     feature_active = false;
                     feature_exit_requested = false;
                     displayMenu();
                     handleButtons();
                     is_main_menu = false;
+                } else if (current_submenu_index == 6) {  // BLE Tracker Scan
+                    in_sub_menu = true;
+                    feature_active = true;
+                    feature_exit_requested = false;
+                    TrackerScanner::run();
+                    in_sub_menu = true;
+                    is_main_menu = false;
+                    submenu_initialized = false;
+                    feature_active = false;
+                    feature_exit_requested = false;
+                    displaySubmenu();
+                    delay(200);
                 } else if (current_submenu_index == 0) {
                     current_submenu_index = 0;
                     in_sub_menu = true;
@@ -2965,6 +2990,20 @@ void handleOtherSubmenuButtons() {
                     delay(200);
                 }
             }
+            else if (current_submenu_index == 3) {
+                feature_active = true;
+                feature_exit_requested = false;
+                TVBGone::run();
+                in_sub_menu = true;
+                is_main_menu = false;
+                submenu_initialized = false;
+                feature_active = false;
+                feature_exit_requested = false;
+                displaySubmenu();
+                delay(200);
+                while (featureExitButtonPressed()) {
+                }
+            }
         } else if (other_layer == OTHER_LAYER_RFID) {
             if (current_submenu_index == rfid_NUM_SUBMENU_ITEMS - 1) {
                 other_layer = OTHER_LAYER_HOME;
@@ -3181,6 +3220,20 @@ void handleOtherSubmenuButtons() {
                     feature_exit_requested = false;
                     displaySubmenu();
                     delay(200);
+                }
+            }
+            else if (current_submenu_index == 3) {
+                feature_active = true;
+                feature_exit_requested = false;
+                TVBGone::run();
+                in_sub_menu = true;
+                is_main_menu = false;
+                submenu_initialized = false;
+                feature_active = false;
+                feature_exit_requested = false;
+                displaySubmenu();
+                delay(200);
+                while (featureExitButtonPressed()) {
                 }
             }
         } else if (other_layer == OTHER_LAYER_RFID) {
