@@ -2981,6 +2981,14 @@ void scannerLoop() {
     display();
     delay(2);
   }
+
+  // Restore the shared SPI bus to the SD/CC1101 pin mapping. The scanner re-pinned it
+  // to the NRF24 roles (SPI.begin(13,11,12,4)) and never put it back, so after running
+  // the 2.4GHz scanner the CC1101 and SD card stayed on the wrong pins until reboot
+  // (issue #142 "floating CC1101", and SD-not-working reports).
+  disable();
+  SPI.end();
+  SPI.begin(SD_SCLK, SD_MISO, SD_MOSI);
 }
 
 }  // namespace Scanner
@@ -3665,7 +3673,9 @@ private:
 
   void checkMacSpoofing(DeviceInfo& device, unsigned long timestamp) {
     for (int i = 0; i < deviceCount; i++) {
-      if (devices[i].mac == device.mac && i != deviceCount) {
+      // exclude the device matching itself; `i != deviceCount` was always true (the
+      // new entry sits at index deviceCount), so every device flagged itself as spoof.
+      if (devices[i].mac == device.mac && &devices[i] != &device) {
         devices[i].isSuspicious = true;
         device.isSuspicious = true;
         suspiciousCount++;
