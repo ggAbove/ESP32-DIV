@@ -12,6 +12,7 @@
 #include "rfid.h"
 #include "shared.h"
 #include "utils.h"
+#include "Pwnagotchi.h"
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -47,7 +48,7 @@ const unsigned char *bitmap_icons[NUM_MENU_ITEMS] = {
 int current_menu_index = 0;
 bool is_main_menu = false;
 
-const int NUM_SUBMENU_ITEMS = 8;
+const int NUM_SUBMENU_ITEMS = 9;
 const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Packet Monitor",
     "Beacon Spammer",
@@ -56,6 +57,7 @@ const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Deauth Detector",
     "WiFi Scanner",
     "Captive Portal",
+    "Pwnagotchi",
     "Back to Main Menu"};
 
 const int bluetooth_NUM_SUBMENU_ITEMS = 7;
@@ -152,6 +154,7 @@ const unsigned char *wifi_submenu_icons[NUM_SUBMENU_ITEMS] = {
     bitmap_icon_eye2,
     bitmap_icon_jammer,
     bitmap_icon_bash,
+    bitmap_icon_eye2,
     bitmap_icon_go_back
 };
 
@@ -584,7 +587,10 @@ void bySawConsolePoll() {
       String cmd = String(line);
       cmd.trim();
       if (cmd == "help") {
-        Serial.println("cmds: help info heap reason reboot | nav up/down/sel/left/right/esc");
+        Serial.println("cmds: help info heap state reason reboot | nav up/down/sel/left/right/esc");
+      } else if (cmd == "state") {
+        Serial.printf("[state] menu=%d submenu=%d feature_active=%d heap=%u\n", current_menu_index,
+                      current_submenu_index, (int)feature_active, ESP.getFreeHeap());
       } else if (cmd == "info") {
         Serial.printf("[info] heap=%u min=%u uptime=%lus cpu=%dMHz reset=%s\n", ESP.getFreeHeap(),
                       ESP.getMinFreeHeap(), millis() / 1000, getCpuFrequencyMhz(),
@@ -620,6 +626,18 @@ void bySawConsolePoll() {
       line[n++] = c;
     }
   }
+}
+
+// Run the console from a background task so commands (incl. nav injection) work
+// everywhere — inside feature loops too, not just the main menu loop().
+static void bySawConsoleTask(void *) {
+  for (;;) {
+    bySawConsolePoll();
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+void bySawConsoleStartTask() {
+  xTaskCreatePinnedToCore(bySawConsoleTask, "bySawConsole", 4096, nullptr, 1, nullptr, 0);
 }
 
 bool isPhysicalButtonPressed(int buttonPin) {
@@ -1027,13 +1045,29 @@ void handleWiFiSubmenuButtons() {
         last_interaction_time = millis();
         delay(70);
 
-        if (current_submenu_index == 7) {
+        if (current_submenu_index == 8) {
             in_sub_menu = false;
             feature_active = false;
             feature_exit_requested = false;
             displayMenu();
             handleButtons();
             is_main_menu = false;
+        }
+
+        if (current_submenu_index == 7) {  // Pwnagotchi
+            in_sub_menu = true;
+            feature_active = true;
+            feature_exit_requested = false;
+            Pwnagotchi::run();
+            in_sub_menu = true;
+            is_main_menu = false;
+            submenu_initialized = false;
+            feature_active = false;
+            feature_exit_requested = false;
+            displaySubmenu();
+            delay(200);
+            while (isButtonPressed(BTN_SELECT)) {
+            }
         }
 
         if (current_submenu_index == 0) {
@@ -1293,13 +1327,25 @@ void handleWiFiSubmenuButtons() {
                 displaySubmenu();
                 delay(200);
 
-                if (current_submenu_index == 7) {
+                if (current_submenu_index == 8) {
                     in_sub_menu = false;
                     feature_active = false;
                     feature_exit_requested = false;
                     displayMenu();
                     handleButtons();
                     is_main_menu = false;
+                } else if (current_submenu_index == 7) {  // Pwnagotchi
+                    in_sub_menu = true;
+                    feature_active = true;
+                    feature_exit_requested = false;
+                    Pwnagotchi::run();
+                    in_sub_menu = true;
+                    is_main_menu = false;
+                    submenu_initialized = false;
+                    feature_active = false;
+                    feature_exit_requested = false;
+                    displaySubmenu();
+                    delay(200);
                 } else if (current_submenu_index == 0) {
                     current_submenu_index = 0;
                     in_sub_menu = true;
@@ -3410,6 +3456,7 @@ void setup() {
   Serial.begin(115200);
   delay(50);
   bySawBootBanner();
+  bySawConsoleStartTask();
   Serial.println("[boot] start");
 
   tft.init();
@@ -3468,7 +3515,6 @@ void setup() {
 }
 
 void loop() {
-  bySawConsolePoll();
   applyThemeToPalette(settings().theme);
   handleButtons();
   updateStatusBar();
