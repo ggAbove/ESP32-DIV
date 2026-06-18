@@ -12,6 +12,15 @@
 #endif
 #define TFT_BLACK FEATURE_BG
 
+// NRF24 jammer transmit power. Three radios running a constant carrier at
+// RF24_PA_MAX draw enough current (especially on PA+LNA modules) to sag the
+// supply rail — the screen dims and the ESP32 brownout-resets. RF24_PA_LOW keeps
+// all three channels jammed at short range without the brownout. Raise to
+// RF24_PA_HIGH / RF24_PA_MAX only on a strong supply (good USB, not battery).
+#ifndef JAMMER_PA_LEVEL
+#define JAMMER_PA_LEVEL RF24_PA_LOW
+#endif
+
 #ifndef FEATURE_TEXT
 #define FEATURE_TEXT ORANGE
 #endif
@@ -1249,7 +1258,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setAutoAck(false);
   radio.stopListening();
   radio.setRetries(0, 0);
-  radio.setPALevel(RF24_PA_MAX, true);
+  radio.setPALevel(JAMMER_PA_LEVEL, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
   // NOTE: printPrettyDetails() removed — it blasts dozens of blocking Serial lines on
@@ -1257,7 +1266,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
 
   for (size_t i = 0; i < size; i++) {
     radio.setChannel(channels[i]);
-    radio.startConstCarrier(RF24_PA_MAX, channels[i]);
+    radio.startConstCarrier(JAMMER_PA_LEVEL, channels[i]);
   }
 }
 
@@ -3129,7 +3138,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setAutoAck(false);
   radio.stopListening();
   radio.setRetries(0, 0);
-  radio.setPALevel(RF24_PA_MAX, true);
+  radio.setPALevel(JAMMER_PA_LEVEL, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
   // NOTE: printPrettyDetails() removed — it blasts dozens of blocking Serial lines on
@@ -3137,7 +3146,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
 
   for (size_t i = 0; i < size; i++) {
     radio.setChannel(channels[i]);
-    radio.startConstCarrier(RF24_PA_MAX, channels[i]);
+    radio.startConstCarrier(JAMMER_PA_LEVEL, channels[i]);
   }
 }
 
