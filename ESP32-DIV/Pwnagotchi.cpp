@@ -137,39 +137,116 @@ static void deauthBurst() {
   esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
 }
 
-// ---- pixel face ----
-static void drawFace(const char* eyes, const char* mouth) {
+// ---- mascot: a cute WiFi pet with Duolingo-style moods + speech ----
+enum Mood { MOOD_SAD, MOOD_HUNT, MOOD_ATTACK, MOOD_HAPPY };
+
+static const char* moodMsg(Mood m, uint8_t i) {
+  if (m == MOOD_HAPPY) {
+    static const char* a[] = {"GOT IT! <3", "yummy handshake!", "+1 streak!", "nom nom keys"};
+    return a[i & 3];
+  }
+  if (m == MOOD_ATTACK) {
+    static const char* a[] = {"DEAUTH!! >:)", "reconnect plz", "kickin clients", "gimme that 4-way"};
+    return a[i & 3];
+  }
+  if (m == MOOD_SAD) {
+    static const char* a[] = {"where r the wifis?", "hello? anyone?", "so quiet...", "i'm bored :("};
+    return a[i & 3];
+  }
+  static const char* a[] = {"sniff sniff...", "i smell packets", "c'mon handshake", "hunting..."};
+  return a[i & 3];
+}
+
+static void drawPet(Mood m) {
   const int cx = tft.width() / 2;
-  tft.fillRect(0, 40, tft.width(), 90, UI_BG);
-  tft.setTextColor(UI_ICON, UI_BG);
+  const int top = 42;
+  tft.fillRect(0, top - 12, tft.width(), 104, UI_BG);
+
+  const uint16_t body = (m == MOOD_ATTACK) ? UI_WARN : (m == MOOD_HAPPY) ? UI_OK : UI_ICON;
+  // wifi antennas
+  tft.drawLine(cx - 16, top + 6, cx - 28, top - 8, body); tft.fillCircle(cx - 28, top - 8, 3, body);
+  tft.drawLine(cx + 16, top + 6, cx + 28, top - 8, body); tft.fillCircle(cx + 28, top - 8, 3, body);
+  // head
+  tft.fillRoundRect(cx - 44, top + 6, 88, 74, 18, body);
+  tft.drawRoundRect(cx - 44, top + 6, 88, 74, 18, UI_LINE);
+  // eye whites
+  const int ey = top + 36;
+  tft.fillCircle(cx - 19, ey, 14, TFT_WHITE);
+  tft.fillCircle(cx + 19, ey, 14, TFT_WHITE);
+  const uint16_t blk = TFT_BLACK;
+  if (m == MOOD_HAPPY) {
+    tft.drawLine(cx - 27, ey + 2, cx - 19, ey - 7, blk); tft.drawLine(cx - 19, ey - 7, cx - 11, ey + 2, blk);
+    tft.drawLine(cx + 11, ey + 2, cx + 19, ey - 7, blk); tft.drawLine(cx + 19, ey - 7, cx + 27, ey + 2, blk);
+    tft.fillCircle(cx - 33, ey + 13, 4, TFT_PINK); tft.fillCircle(cx + 33, ey + 13, 4, TFT_PINK);
+  } else if (m == MOOD_ATTACK) {
+    tft.fillCircle(cx - 19, ey + 3, 5, blk); tft.fillCircle(cx + 19, ey + 3, 5, blk);
+    tft.drawLine(cx - 28, ey - 13, cx - 10, ey - 5, blk); tft.drawLine(cx + 10, ey - 5, cx + 28, ey - 13, blk);
+  } else if (m == MOOD_SAD) {
+    tft.fillCircle(cx - 19, ey + 6, 5, blk); tft.fillCircle(cx + 19, ey + 6, 5, blk);
+  } else {
+    tft.fillCircle(cx - 19, ey, 6, blk); tft.fillCircle(cx + 19, ey, 6, blk);
+  }
+  // mouth
+  const int my = top + 62;
+  if (m == MOOD_HAPPY) {
+    for (int i = -13; i <= 13; i++) tft.drawPixel(cx + i, my + (i * i) / 20, blk);
+  } else if (m == MOOD_ATTACK) {
+    tft.fillRoundRect(cx - 11, my - 3, 22, 10, 3, blk);
+    tft.drawFastVLine(cx, my - 3, 10, body);
+  } else if (m == MOOD_SAD) {
+    for (int i = -11; i <= 11; i++) tft.drawPixel(cx + i, my + 7 - (i * i) / 22, blk);
+  } else {
+    tft.fillCircle(cx, my + 2, 4, blk);
+  }
+}
+
+static void drawBubble(const char* msg) {
+  const int cx = tft.width() / 2;
+  const int y = 140, h = 26, w = tft.width() - 24;
+  tft.fillRect(0, y - 8, tft.width(), h + 12, UI_BG);
+  tft.fillTriangle(cx - 6, y, cx + 6, y, cx, y - 7, UI_FG);
+  tft.fillRoundRect(12, y, w, h, 8, UI_FG);
+  tft.drawRoundRect(12, y, w, h, 8, UI_LINE);
+  tft.setTextColor(UI_TEXT, UI_FG);
   tft.setTextFont(1);
-  tft.setTextSize(4);
-  tft.drawCentreString(eyes, cx, 55, 1);
-  tft.setTextSize(3);
-  tft.drawCentreString(mouth, cx, 95, 1);
+  tft.setTextSize(1);
+  tft.drawCentreString(msg, cx, y + 9, 1);
 }
 
 static void drawStats() {
-  tft.setTextColor(UI_TEXT, UI_BG);
+  const int cx = tft.width() / 2;
   tft.setTextFont(1);
-  tft.setTextSize(1);
-  tft.fillRect(0, 150, tft.width(), 90, UI_BG);
+  tft.fillRect(0, 174, tft.width(), 110, UI_BG);
   char l[48];
-  snprintf(l, sizeof(l), "CH %-2d  APs %d  %s", s_channel, s_bssidCount,
-           s_active ? "ATTACK" : "passive");
-  tft.setTextColor(s_active ? UI_WARN : UI_TEXT, UI_BG);
-  tft.drawCentreString(l, tft.width() / 2, 158, 1);
-  tft.setTextSize(2);
-  tft.setTextColor(UI_ICON, UI_BG);
-  snprintf(l, sizeof(l), "HS %lu", (unsigned long)s_eapol);
-  tft.drawCentreString(l, tft.width() / 2, 176, 1);
-  snprintf(l, sizeof(l), "PMKID %lu", (unsigned long)s_pmkid);
-  tft.setTextColor(UI_OK, UI_BG);
-  tft.drawCentreString(l, tft.width() / 2, 200, 1);
+
+  // mode badge
   tft.setTextSize(1);
-  tft.setTextColor(UI_TEXT, UI_BG);
-  snprintf(l, sizeof(l), "deauth %lu   UP=mode", (unsigned long)s_deauths);
-  tft.drawCentreString(l, tft.width() / 2, 226, 1);
+  snprintf(l, sizeof(l), " %s  CH %-2d  APs %d ", s_active ? "ATTACK" : "passive", s_channel,
+           s_bssidCount);
+  uint16_t badge = s_active ? UI_WARN : UI_FG;
+  int bw = tft.textWidth(l) + 4;
+  tft.fillRoundRect(cx - bw / 2, 176, bw, 16, 4, badge);
+  tft.setTextColor(s_active ? TFT_BLACK : UI_TEXT, badge);
+  tft.drawCentreString(l, cx, 180, 1);
+
+  // big capture counters (the "score")
+  tft.setTextSize(3);
+  tft.setTextColor(UI_ICON, UI_BG);
+  snprintf(l, sizeof(l), "%lu", (unsigned long)s_eapol);
+  tft.drawCentreString(l, cx - 50, 204, 1);
+  tft.setTextColor(UI_OK, UI_BG);
+  snprintf(l, sizeof(l), "%lu", (unsigned long)s_pmkid);
+  tft.drawCentreString(l, cx + 50, 204, 1);
+  tft.setTextSize(1);
+  tft.setTextColor(UI_DIM_TEXT, UI_BG);
+  tft.drawCentreString("HANDSHAKE", cx - 50, 232, 1);
+  tft.drawCentreString("PMKID", cx + 50, 232, 1);
+
+  // footer
+  tft.setTextColor(UI_DIM_TEXT, UI_BG);
+  snprintf(l, sizeof(l), "deauth %lu", (unsigned long)s_deauths);
+  tft.drawCentreString(l, cx, 250, 1);
+  tft.drawCentreString("UP: mode    SEL: exit", cx, 264, 1);
 }
 
 void run() {
@@ -218,7 +295,9 @@ void run() {
                 e_ch);
 
   uint32_t lastHop = 0, lastDraw = 0, lastDeauth = 0, lastLog = 0;
-  uint32_t lastEapol = 0;
+  uint32_t lastEapol = 0, happyUntil = 0, lastMsg = 0;
+  Mood lastMood = (Mood)-1;
+  uint8_t msgIdx = 0;
 
   while (!feature_exit_requested && !featureExitButtonPressed()) {
     uint32_t now = millis();
@@ -235,13 +314,15 @@ void run() {
     // active mode: deauth-assist burst on the current channel (~1.5s cadence)
     if (s_active && now - lastDeauth > 1500) { deauthBurst(); lastDeauth = now; }
 
-    // redraw ~3 Hz; face reacts to recent captures
-    if (now - lastDraw > 300) {
-      bool caught = (s_eapol != lastEapol);
-      lastEapol = s_eapol;
-      if (caught)                 drawFace("^_^", "GOT IT");
-      else if (s_bssidCount == 0) drawFace("-_-", "...");
-      else                        drawFace("o_o", "hunt");
+    // redraw ~4 Hz; the pet's mood + speech react to captures
+    if (now - lastDraw > 250) {
+      if (s_eapol != lastEapol) { lastEapol = s_eapol; happyUntil = now + 2800; }
+      Mood m = (now < happyUntil) ? MOOD_HAPPY
+               : s_active          ? MOOD_ATTACK
+               : (s_bssidCount == 0) ? MOOD_SAD
+                                     : MOOD_HUNT;
+      if (m != lastMood) { drawPet(m); lastMood = m; lastMsg = 0; }
+      if (now - lastMsg > 2600) { drawBubble(moodMsg(m, msgIdx++)); lastMsg = now; }
       drawStats();
       lastDraw = now;
     }
