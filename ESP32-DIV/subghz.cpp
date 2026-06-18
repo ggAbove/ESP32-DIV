@@ -1069,7 +1069,8 @@ for (int j = 0; j < samplesSUB >> 1; j++) {
     int k = vRealSUB[j] / attenuation_num;
     if (k > max_k)
         max_k = k;
-    if (k > 127) k = 127;
+    if (k < 0) k = 0;  // mean-subtracted FFT magnitude can go negative -> OOB read
+    else if (k > 127) k = 127;
 
     unsigned int color = red[k] << 11 | green[k] << 5 | blue[k];
     unsigned int vertical_x = left_x + j;
@@ -1081,7 +1082,8 @@ for (int j = 0; j < samplesSUB >> 1; j++) {
     int k = vRealSUB[j] / attenuation_num;
     if (k > max_k)
         max_k = k;
-    if (k > 127) k = 127;
+    if (k < 0) k = 0;  // mean-subtracted FFT magnitude can go negative -> OOB read
+    else if (k > 127) k = 127;
 
     unsigned int color = red[k] << 11 | green[k] << 5 | blue[k];
     unsigned int mirrored_x = left_x - j;
@@ -2753,6 +2755,13 @@ void subjammerLoop() {
 
     if (feature_active && (feature_exit_requested || featureExitButtonPressed())) {
         feature_exit_requested = true;
+        // Idle the CC1101 on exit — leaving while jamming kept the radio keyed
+        // (continuous carrier) and TX_PIN high after the menu closed.
+        if (jammingRunning) {
+            jammingRunning = false;
+            ELECHOUSE_cc1101.setSidle();
+            digitalWrite(TX_PIN, LOW);
+        }
         return;
     }
 
