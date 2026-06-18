@@ -887,7 +887,7 @@ void ptmLoop() {
     btnRightPressed = false;
   }
 
-  pkts[127] = tmpPacketCounter;
+  pkts[MAX_X - 1] = tmpPacketCounter;
 
   tmpPacketCounter = 0;
   deauths = 0;
@@ -3016,7 +3016,10 @@ static void cpStartDeauth(const String& ssid, const uint8_t* bssid, uint8_t chan
   if (cp_deauth_active) return;
 
   memset(&cp_target_ap, 0, sizeof(cp_target_ap));
-  strcpy((char*)cp_target_ap.ssid, ssid.c_str());
+  // Bounded copy: a crafted/buggy beacon SSID >32 bytes would overflow the 33-byte
+  // wifi_ap_record_t::ssid and smash adjacent statics (unbounded strcpy of attacker data).
+  strncpy((char*)cp_target_ap.ssid, ssid.c_str(), sizeof(cp_target_ap.ssid) - 1);
+  cp_target_ap.ssid[sizeof(cp_target_ap.ssid) - 1] = 0;
   memcpy(cp_target_ap.bssid, bssid, 6);
   cp_target_ap.primary = channel;
   cp_target_channel = channel;
