@@ -1046,46 +1046,29 @@ void loading(int frameDelay, uint16_t color, int16_t x, int16_t y, int repeats, 
 }
 
 void displayLogo(uint16_t color, int displayTime) {
-  int16_t bitmapWidth = 150;
-  int16_t bitmapHeight = 150;
-  int16_t screenWidth = tft.width();
-  int16_t screenHeight = tft.height();
-  int16_t logoX = (screenWidth - bitmapWidth) / 2;
-  int16_t logoY = (screenHeight - bitmapHeight) / 2 - 20;
+  // Minimalist modern bySaw boot wordmark (replaces the CiferTech logo/bitmap).
+  const int16_t cx = tft.width() / 2;
+  const int16_t cy = tft.height() / 2;
 
-  tft.fillRect(logoX, logoY, bitmapWidth, bitmapHeight, TFT_BLACK);
-  tft.drawBitmap(logoX, logoY, bitmap_icon_cifer, bitmapWidth, bitmapHeight, color);
-
-  tft.setTextColor(color);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(color, TFT_BLACK);
   tft.setTextFont(1);
 
+  tft.setTextSize(5);
+  tft.drawCentreString("bySaw", cx, cy - 52, 1);
+
+  // thin accent underline
+  tft.drawFastHLine(cx - 70, cy - 2, 140, color);
+
   tft.setTextSize(2);
-  int16_t textX = screenWidth / 3.5;
-  int16_t textY = logoY + bitmapHeight + 10;
-  tft.setCursor(textX, textY);
-  tftPrintObf(OBF_PN, sizeof(OBF_PN));
+  tft.drawCentreString("DIV", cx, cy + 10, 1);
 
   tft.setTextSize(1);
-  textX = screenWidth / 3.5;
-  textY += 20;
-  tft.setCursor(textX, textY);
-  tft.print("by ");
-  tftPrintObf(OBF_DN, sizeof(OBF_DN));
-
-  textX = screenWidth / 2.5;
-  textY += 50;
-  tft.setCursor(textX, textY);
-  // Version is intentionally NOT obfuscated.
-  tft.print(ESP32DIV_VERSION);
+  tft.drawCentreString(ESP32DIV_VERSION, cx, cy + 44, 1);
 
   Serial.println("==================================");
-  serialPrintObf(OBF_PN, sizeof(OBF_PN), true);
-  Serial.print("Developed by: "); serialPrintObf(OBF_DN, sizeof(OBF_DN), true);
-  // Version is intentionally NOT obfuscated.
-  Serial.print("Version:      "); Serial.println(ESP32DIV_VERSION);
-  Serial.print("Contact:      "); serialPrintObf(OBF_EM, sizeof(OBF_EM), true);
-  Serial.print("GitHub:       "); serialPrintObf(OBF_GH, sizeof(OBF_GH), true);
-  Serial.print("Website:      "); serialPrintObf(OBF_WB, sizeof(OBF_WB), true);
+  Serial.println(" bySaw DIV firmware  (fork of ESP32-DIV)");
+  Serial.print(" Version: "); Serial.println(ESP32DIV_VERSION);
   Serial.println("==================================");
 
   delay(displayTime);

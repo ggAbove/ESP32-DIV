@@ -8,7 +8,7 @@ static AppSettings g_settings;
 AppSettings& settings() { return g_settings; }
 
 static const AccentOption kAccentPresets[] = {
-  {"Orange", 0xFBE4},
+  {"Aqua",   0x05FF},
   {"Green",  0x07E0},
   {"Red",    0xF800},
   {"Cyan",   0x07FF},

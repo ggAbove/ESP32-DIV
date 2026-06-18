@@ -16,19 +16,21 @@ uint16_t uiUniversalColor();
 #define TFTWHITE       0xFFFF
 #define TFT_GRAY       0x8410
 
-#define BG_Dark        0x20e4
+// bySaw minimalist-modern palette: neutral charcoal surfaces, hairline dividers,
+// a single cyan accent. (Dark theme is the default.)
+#define BG_Dark        0x1082   // ~rgb(16,16,16) charcoal background
 #define BG_Light       0xf7de
-#define FG_Dark        0x3166
+#define FG_Dark        0x2104   // ~rgb(32,32,32) card / panel surface
 #define FG_Light       0xe73c
-#define LINE_Dark      0x8410  
-#define LINE_Light     0x8410  
-#define ICON_Dark      0xFBE4 
-#define ICON_Light     0xFBE4
+#define LINE_Dark      0x4208   // ~rgb(64,64,64) hairline divider
+#define LINE_Light     0x8410
+#define ICON_Dark      0x05FF   // modern cyan accent
+#define ICON_Light     0x05FF
 #define TEXT_Dark      0xFFFF
-#define TEXT_Light     0x0000   
-#define UI_ACCENT      0x3166
+#define TEXT_Light     0x0000
+#define UI_ACCENT      0x05FF   // modern cyan accent
 
-#define L_Dark        0x4208
+#define L_Dark        0x18E3   // ~rgb(24,28,24) status-bar surface
 #define L_Light       0xC618
 
 // Default background for feature screens (separate from main menu background).
@@ -70,7 +72,7 @@ uint16_t uiUniversalColor();
 
 /*──────────────────── Project Info ────────────────────*/
 #ifndef ESP32DIV_NAME
-#define ESP32DIV_NAME "ESP32-DIV"
+#define ESP32DIV_NAME "bySaw"
 #endif
 #ifndef ESP32DIV_VERSION
 #define ESP32DIV_VERSION "v1.7.0"
