@@ -157,46 +157,68 @@ static const char* moodMsg(Mood m, uint8_t i) {
   return a[i & 3];
 }
 
-static void drawPet(Mood m) {
-  const int cx = tft.width() / 2;
-  const int top = 42;
-  tft.fillRect(0, top - 12, tft.width(), 104, UI_BG);
+// Duolingo-style green owl mascot.
+static const uint16_t OWL_GREEN = 0x5E60;  // ~#58CC02 Duo green
+static const uint16_t OWL_DARK  = 0x3C00;  // darker green (brows/wings/outline)
+static const uint16_t OWL_BELLY = 0x8F23;  // light belly green
+static const uint16_t OWL_BEAK  = 0xFCA0;  // orange beak/feet
+static const uint16_t OWL_BEAK2 = 0xC2A0;  // darker lower beak
 
-  const uint16_t body = (m == MOOD_ATTACK) ? UI_WARN : (m == MOOD_HAPPY) ? UI_OK : UI_ICON;
-  // wifi antennas
-  tft.drawLine(cx - 16, top + 6, cx - 28, top - 8, body); tft.fillCircle(cx - 28, top - 8, 3, body);
-  tft.drawLine(cx + 16, top + 6, cx + 28, top - 8, body); tft.fillCircle(cx + 28, top - 8, 3, body);
-  // head
-  tft.fillRoundRect(cx - 44, top + 6, 88, 74, 18, body);
-  tft.drawRoundRect(cx - 44, top + 6, 88, 74, 18, UI_LINE);
-  // eye whites
-  const int ey = top + 36;
-  tft.fillCircle(cx - 19, ey, 14, TFT_WHITE);
-  tft.fillCircle(cx + 19, ey, 14, TFT_WHITE);
-  const uint16_t blk = TFT_BLACK;
-  if (m == MOOD_HAPPY) {
-    tft.drawLine(cx - 27, ey + 2, cx - 19, ey - 7, blk); tft.drawLine(cx - 19, ey - 7, cx - 11, ey + 2, blk);
-    tft.drawLine(cx + 11, ey + 2, cx + 19, ey - 7, blk); tft.drawLine(cx + 19, ey - 7, cx + 27, ey + 2, blk);
-    tft.fillCircle(cx - 33, ey + 13, 4, TFT_PINK); tft.fillCircle(cx + 33, ey + 13, 4, TFT_PINK);
-  } else if (m == MOOD_ATTACK) {
-    tft.fillCircle(cx - 19, ey + 3, 5, blk); tft.fillCircle(cx + 19, ey + 3, 5, blk);
-    tft.drawLine(cx - 28, ey - 13, cx - 10, ey - 5, blk); tft.drawLine(cx + 10, ey - 5, cx + 28, ey - 13, blk);
-  } else if (m == MOOD_SAD) {
-    tft.fillCircle(cx - 19, ey + 6, 5, blk); tft.fillCircle(cx + 19, ey + 6, 5, blk);
-  } else {
-    tft.fillCircle(cx - 19, ey, 6, blk); tft.fillCircle(cx + 19, ey, 6, blk);
+static void drawOwl(Mood m) {
+  const int cx = tft.width() / 2;
+  const int top = 28;
+  tft.fillRect(0, top - 16, tft.width(), 132, UI_BG);
+
+  // feet
+  tft.fillRoundRect(cx - 24, top + 110, 20, 9, 3, OWL_BEAK);
+  tft.fillRoundRect(cx + 4, top + 110, 20, 9, 3, OWL_BEAK);
+  // wings
+  tft.fillRoundRect(cx - 58, top + 44, 18, 46, 9, OWL_DARK);
+  tft.fillRoundRect(cx + 40, top + 44, 18, 46, 9, OWL_DARK);
+  // ear tufts
+  tft.fillTriangle(cx - 36, top + 16, cx - 20, top + 16, cx - 30, top - 6, OWL_GREEN);
+  tft.fillTriangle(cx + 20, top + 16, cx + 36, top + 16, cx + 30, top - 6, OWL_GREEN);
+  // body (egg)
+  tft.fillRoundRect(cx - 47, top + 6, 94, 108, 44, OWL_GREEN);
+  // belly
+  tft.fillRoundRect(cx - 30, top + 62, 60, 50, 26, OWL_BELLY);
+
+  // eyes (big, touching white discs)
+  const int eyR = 25, eyY = top + 34;
+  tft.fillCircle(cx - 22, eyY, eyR, TFT_WHITE);
+  tft.fillCircle(cx + 22, eyY, eyR, TFT_WHITE);
+  tft.drawCircle(cx - 22, eyY, eyR, OWL_DARK);
+  tft.drawCircle(cx + 22, eyY, eyR, OWL_DARK);
+
+  // pupils (shift by mood)
+  int pdy = (m == MOOD_SAD) ? 7 : (m == MOOD_HAPPY) ? -4 : 0;
+  tft.fillCircle(cx - 22, eyY + pdy, 11, TFT_BLACK);
+  tft.fillCircle(cx + 22, eyY + pdy, 11, TFT_BLACK);
+  tft.fillCircle(cx - 26, eyY - 4 + pdy, 3, TFT_WHITE);
+  tft.fillCircle(cx + 18, eyY - 4 + pdy, 3, TFT_WHITE);
+
+  // brows (thick green) per mood
+  for (int t = 0; t < 5; t++) {
+    int yt = eyY - 22 + t;
+    if (m == MOOD_ATTACK) {            // angry  \   /
+      tft.drawLine(cx - 42, yt - 4, cx - 8, yt + 6, OWL_DARK);
+      tft.drawLine(cx + 8, yt + 6, cx + 42, yt - 4, OWL_DARK);
+    } else if (m == MOOD_SAD) {        // worried /   \ .
+      tft.drawLine(cx - 42, yt + 6, cx - 8, yt - 4, OWL_DARK);
+      tft.drawLine(cx + 8, yt - 4, cx + 42, yt + 6, OWL_DARK);
+    } else if (m == MOOD_HAPPY) {      // raised
+      tft.drawLine(cx - 40, yt - 2, cx - 10, yt - 6, OWL_DARK);
+      tft.drawLine(cx + 10, yt - 6, cx + 40, yt - 2, OWL_DARK);
+    }
   }
-  // mouth
-  const int my = top + 62;
-  if (m == MOOD_HAPPY) {
-    for (int i = -13; i <= 13; i++) tft.drawPixel(cx + i, my + (i * i) / 20, blk);
-  } else if (m == MOOD_ATTACK) {
-    tft.fillRoundRect(cx - 11, my - 3, 22, 10, 3, blk);
-    tft.drawFastVLine(cx, my - 3, 10, body);
-  } else if (m == MOOD_SAD) {
-    for (int i = -11; i <= 11; i++) tft.drawPixel(cx + i, my + 7 - (i * i) / 22, blk);
+
+  // beak (orange) just below the eyes
+  const int bky = top + 52;
+  if (m == MOOD_HAPPY || m == MOOD_ATTACK) {  // open beak
+    tft.fillTriangle(cx - 11, bky, cx + 11, bky, cx, bky + 8, OWL_BEAK);
+    tft.fillTriangle(cx - 9, bky + 9, cx + 9, bky + 9, cx, bky + 17, OWL_BEAK2);
   } else {
-    tft.fillCircle(cx, my + 2, 4, blk);
+    tft.fillTriangle(cx - 10, bky, cx + 10, bky, cx, bky + 13, OWL_BEAK);
   }
 }
 
@@ -259,10 +281,10 @@ void run() {
   s_channel = 1;
 
   tft.fillScreen(UI_BG);
-  tft.setTextColor(UI_ICON, UI_BG);
+  tft.setTextColor(UI_DIM_TEXT, UI_BG);
   tft.setTextFont(1);
-  tft.setTextSize(2);
-  tft.drawCentreString("pwnagotchi", tft.width() / 2, 12, 1);
+  tft.setTextSize(1);
+  tft.drawCentreString("bySaw pwnagotchi", tft.width() / 2, 4, 1);
 
   // open SD pcap
   if (SD.cardType() != CARD_NONE) {
@@ -321,7 +343,7 @@ void run() {
                : s_active          ? MOOD_ATTACK
                : (s_bssidCount == 0) ? MOOD_SAD
                                      : MOOD_HUNT;
-      if (m != lastMood) { drawPet(m); lastMood = m; lastMsg = 0; }
+      if (m != lastMood) { drawOwl(m); lastMood = m; lastMsg = 0; }
       if (now - lastMsg > 2600) { drawBubble(moodMsg(m, msgIdx++)); lastMsg = now; }
       drawStats();
       lastDraw = now;
