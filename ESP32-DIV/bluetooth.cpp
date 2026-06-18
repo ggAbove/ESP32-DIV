@@ -1234,6 +1234,17 @@ void checkButtons() {
   }
 }
 
+// Radio #1 on the DIV is intermittent on the first begin() right after the shared
+// SPI bus is (re)configured; retry so all three NRF24 modules reliably come up for
+// jamming (matches the custom Bruce 3x-jammer behaviour).
+static bool radioBeginRetry(RF24 &radio) {
+  for (int i = 0; i < 4; i++) {
+    if (radio.begin()) return true;
+    delay(8);
+  }
+  return false;
+}
+
 void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setAutoAck(false);
   radio.stopListening();
@@ -1241,7 +1252,8 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setPALevel(RF24_PA_MAX, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
-  radio.printPrettyDetails();
+  // NOTE: printPrettyDetails() removed — it blasts dozens of blocking Serial lines on
+  // every (re)config, stalling jammer setup (a contributor to the 1.6/1.7 regression).
 
   for (size_t i = 0; i < size; i++) {
     radio.setChannel(channels[i]);
@@ -1250,22 +1262,17 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
 }
 
 void initializeRadiosMultiMode() {
-  bool radio1Active = false;
-  bool radio2Active = false;
-  bool radio3Active = false;
+  bool radio1Active = radioBeginRetry(radio1);
+  bool radio2Active = radioBeginRetry(radio2);
+  bool radio3Active = radioBeginRetry(radio3);
 
-  if (radio1.begin()) {
-    configureRadio(radio1, channelGroup1, sizeof(channelGroup1));
-    radio1Active = true;
-  }
-  if (radio2.begin()) {
-    configureRadio(radio2, channelGroup2, sizeof(channelGroup2));
-    radio2Active = true;
-  }
-  if (radio3.begin()) {
-    configureRadio(radio3, channelGroup3, sizeof(channelGroup3));
-    radio3Active = true;
-  }
+  if (radio1Active) configureRadio(radio1, channelGroup1, sizeof(channelGroup1));
+  if (radio2Active) configureRadio(radio2, channelGroup2, sizeof(channelGroup2));
+  if (radio3Active) configureRadio(radio3, channelGroup3, sizeof(channelGroup3));
+
+  Serial.printf("[jammer] NRF24 active: %d/3 (r1=%d r2=%d r3=%d)\n",
+                (int)radio1Active + (int)radio2Active + (int)radio3Active, radio1Active,
+                radio2Active, radio3Active);
 }
 
 void initializeRadios() {
@@ -3099,6 +3106,17 @@ void prokillHandleNavButtons() {
   }
 }
 
+// Radio #1 on the DIV is intermittent on the first begin() right after the shared
+// SPI bus is (re)configured; retry so all three NRF24 modules reliably come up for
+// jamming (matches the custom Bruce 3x-jammer behaviour).
+static bool radioBeginRetry(RF24 &radio) {
+  for (int i = 0; i < 4; i++) {
+    if (radio.begin()) return true;
+    delay(8);
+  }
+  return false;
+}
+
 void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setAutoAck(false);
   radio.stopListening();
@@ -3106,7 +3124,8 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setPALevel(RF24_PA_MAX, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
-  radio.printPrettyDetails();
+  // NOTE: printPrettyDetails() removed — it blasts dozens of blocking Serial lines on
+  // every (re)config, stalling jammer setup (a contributor to the 1.6/1.7 regression).
 
   for (size_t i = 0; i < size; i++) {
     radio.setChannel(channels[i]);
@@ -3115,22 +3134,17 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
 }
 
 void initializeRadiosMultiMode() {
-  bool radio1Active = false;
-  bool radio2Active = false;
-  bool radio3Active = false;
+  bool radio1Active = radioBeginRetry(radio1);
+  bool radio2Active = radioBeginRetry(radio2);
+  bool radio3Active = radioBeginRetry(radio3);
 
-  if (radio1.begin()) {
-    configureRadio(radio1, channelGroup1, sizeof(channelGroup1));
-    radio1Active = true;
-  }
-  if (radio2.begin()) {
-    configureRadio(radio2, channelGroup2, sizeof(channelGroup2));
-    radio2Active = true;
-  }
-  if (radio3.begin()) {
-    configureRadio(radio3, channelGroup3, sizeof(channelGroup3));
-    radio3Active = true;
-  }
+  if (radio1Active) configureRadio(radio1, channelGroup1, sizeof(channelGroup1));
+  if (radio2Active) configureRadio(radio2, channelGroup2, sizeof(channelGroup2));
+  if (radio3Active) configureRadio(radio3, channelGroup3, sizeof(channelGroup3));
+
+  Serial.printf("[jammer] NRF24 active: %d/3 (r1=%d r2=%d r3=%d)\n",
+                (int)radio1Active + (int)radio2Active + (int)radio3Active, radio1Active,
+                radio2Active, radio3Active);
 }
 
 void initializeRadios() {
