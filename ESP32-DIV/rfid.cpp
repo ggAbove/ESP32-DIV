@@ -2252,6 +2252,9 @@ void sessionClone() {
     return;
   }
 
+  // Clamp before copy: PN532 triple-size UIDs are 10 bytes but uid[]/srcUidCopy are
+  // 7 — an over-length uidLength would overflow the 7-byte copy buffer.
+  if (uidLength > sizeof(srcUidCopy)) uidLength = sizeof(srcUidCopy);
   memcpy(srcUidCopy, uid, uidLength);
   char uidStr[24] = "";
   uidToHex(uidStr, sizeof(uidStr), uid, uidLength);
