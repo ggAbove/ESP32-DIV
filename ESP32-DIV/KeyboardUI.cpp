@@ -32,14 +32,14 @@ constexpr unsigned long CURSOR_BLINK_MS = 500;
 static const char* const kStdRowsLower[OS_KEYBOARD_ROW_COUNT] = {
   "1234567890",
   "qwertyuiop",
-  "asdfghjk ^",
+  "asdfghjkl^",
   "zxcvbnm#<",
 };
 
 static const char* const kStdRowsUpper[OS_KEYBOARD_ROW_COUNT] = {
   "1234567890",
   "QWERTYUIOP",
-  "ASDFGHJK ^",
+  "ASDFGHJKL^",
   "ZXCVBNM#<",
 };
 
