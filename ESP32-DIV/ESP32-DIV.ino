@@ -523,7 +523,109 @@ static bool isTouchNavSlotDown(int idx) {
   return FeatureUI::hit(s_touchNavBtns, 5, x, y) == idx;
 }
 
+// ===================================================================
+// bySaw debug console — serial-injected virtual buttons + crash/reset logging.
+// Lets the device be driven and inspected over the CP2102 UART (no physical
+// buttons needed), and surfaces the last reset reason so crashes are visible.
+// ===================================================================
+#include "esp_system.h"
+static int           s_bySawBtnPin   = -1;
+static unsigned long s_bySawBtnUntil = 0;
+static bool          s_bySawBtnEdge[8] = {false, false, false, false, false, false, false, false};
+
+void bySawInjectButton(int pin, unsigned long holdMs) {
+  s_bySawBtnPin = pin;
+  s_bySawBtnUntil = millis() + holdMs;
+}
+static bool bySawSerialBtnDown(int pin) {
+  return s_bySawBtnPin == pin && (long)(s_bySawBtnUntil - millis()) > 0;
+}
+
+static const char *bySawResetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:  return "POWERON";
+    case ESP_RST_EXT:      return "EXT";
+    case ESP_RST_SW:       return "SW";
+    case ESP_RST_PANIC:    return "PANIC (crash!)";
+    case ESP_RST_INT_WDT:  return "INT_WDT (watchdog!)";
+    case ESP_RST_TASK_WDT: return "TASK_WDT (watchdog!)";
+    case ESP_RST_WDT:      return "WDT (watchdog!)";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (power!)";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    default:               return "OTHER";
+  }
+}
+
+void bySawBootBanner() {
+  esp_reset_reason_t rr = esp_reset_reason();
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("  bySaw DIV firmware  (fork of ESP32-DIV)");
+  Serial.printf("  last reset : %s\n", bySawResetReasonStr(rr));
+  Serial.printf("  chip       : %s rev%d  %d MHz\n", ESP.getChipModel(), ESP.getChipRevision(),
+                getCpuFrequencyMhz());
+  Serial.printf("  free heap  : %u bytes (min %u)\n", ESP.getFreeHeap(), ESP.getMinFreeHeap());
+  if (rr == ESP_RST_PANIC || rr == ESP_RST_INT_WDT || rr == ESP_RST_TASK_WDT || rr == ESP_RST_WDT)
+    Serial.println("  >> previous boot ended in a CRASH — backtrace was printed above the reset <<");
+  Serial.println("  type 'help' for the debug console");
+  Serial.println("========================================");
+}
+
+void bySawConsolePoll() {
+  static char line[64];
+  static uint8_t n = 0;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      line[n] = 0;
+      n = 0;
+      if (line[0] == 0) return;
+      String cmd = String(line);
+      cmd.trim();
+      if (cmd == "help") {
+        Serial.println("cmds: help info heap reason reboot | nav up/down/sel/left/right/esc");
+      } else if (cmd == "info") {
+        Serial.printf("[info] heap=%u min=%u uptime=%lus cpu=%dMHz reset=%s\n", ESP.getFreeHeap(),
+                      ESP.getMinFreeHeap(), millis() / 1000, getCpuFrequencyMhz(),
+                      bySawResetReasonStr(esp_reset_reason()));
+      } else if (cmd == "heap") {
+        Serial.printf("[heap] free=%u min=%u largest=%u\n", ESP.getFreeHeap(), ESP.getMinFreeHeap(),
+                      ESP.getMaxAllocHeap());
+      } else if (cmd == "reason") {
+        Serial.printf("[reason] %s\n", bySawResetReasonStr(esp_reset_reason()));
+      } else if (cmd == "reboot") {
+        Serial.println("[reboot] restarting...");
+        delay(50);
+        ESP.restart();
+      } else if (cmd.startsWith("nav ")) {
+        String d = cmd.substring(4);
+        d.trim();
+        int pin = -1;
+        if (d == "up") pin = BTN_UP;
+        else if (d == "down") pin = BTN_DOWN;
+        else if (d == "sel" || d == "select") pin = BTN_SELECT;
+        else if (d == "left" || d == "esc") pin = BTN_LEFT;
+        else if (d == "right") pin = BTN_RIGHT;
+        if (pin >= 0) {
+          bySawInjectButton(pin, 180);
+          Serial.printf("[nav] %s\n", d.c_str());
+        } else {
+          Serial.println("[nav] use up/down/sel/left/right/esc");
+        }
+      } else {
+        Serial.printf("[?] unknown: %s (try 'help')\n", cmd.c_str());
+      }
+    } else if (n < sizeof(line) - 1) {
+      line[n++] = c;
+    }
+  }
+}
+
 bool isPhysicalButtonPressed(int buttonPin) {
+  if (bySawSerialBtnDown(buttonPin)) {
+    return true;
+  }
 #if HAS_PCF8574_BUTTONS
   if (getPcf8574Address() != 0) {
     return !pcf.digitalRead(buttonPin);
@@ -564,6 +666,16 @@ bool isTouchNavButtonPressedEdge(int buttonPin) {
 }
 
 bool isButtonPressedEdge(int buttonPin) {
+  // bySaw serial-injected virtual button: produce one rising edge per injection.
+  {
+    const int sidx = buttonPin % 8;
+    const bool sdown = bySawSerialBtnDown(buttonPin);
+    const bool sedge = sdown && !s_bySawBtnEdge[sidx];
+    s_bySawBtnEdge[sidx] = sdown;
+    if (sedge) {
+      return true;
+    }
+  }
 #if HAS_PCF8574_BUTTONS
   if (getPcf8574Address() != 0) {
     const int idx = buttonPin % 8;
@@ -3296,6 +3408,8 @@ void handleButtons() {
 void setup() {
 
   Serial.begin(115200);
+  delay(50);
+  bySawBootBanner();
   Serial.println("[boot] start");
 
   tft.init();
@@ -3354,6 +3468,7 @@ void setup() {
 }
 
 void loop() {
+  bySawConsolePoll();
   applyThemeToPalette(settings().theme);
   handleButtons();
   updateStatusBar();
