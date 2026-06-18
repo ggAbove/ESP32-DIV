@@ -12,31 +12,35 @@
 #endif
 #define TFT_BLACK FEATURE_BG
 
-// NRF24 jammer transmit power. Three radios on a constant carrier at RF24_PA_MAX
-// draw a lot of current (>=100mA each on PA+LNA modules) and sag the supply rail.
-// Max power is kept for range; to stop the sag from brown-out-resetting the chip,
-// the brownout detector is disabled *only while the jammer is on* (jammerSetBrownout
-// below) and restored on exit. The screen may still dim slightly under load — that
-// is the rail sagging, unavoidable at max TX power, but it no longer resets.
-// Drop to RF24_PA_HIGH/LOW (e.g. -D JAMMER_PA_LEVEL=RF24_PA_LOW) to reduce the dim.
+// NRF24 jammer transmit power. Three radios running a constant carrier at
+// RF24_PA_MAX pull more current than this board's 3.3V regulator can source: the
+// rail collapses, the screen blanks and the device drops into a reset loop that
+// only a physical power-cycle clears. (Two USB-C inputs do NOT help — the limit is
+// the 3.3V regulator, not the 5V input.) Disabling the brownout detector made it
+// worse: instead of a clean recoverable reset, the chip hangs until power-cycled.
+// The level is now selectable live in the Proto Kill UI (DOWN cycles LOW/HIGH/MAX)
+// so you can dial power up until your supply gets unstable and back off. It is NOT
+// persisted: every boot starts at JAMMER_PA_LEVEL (default HIGH) so if MAX collapses
+// the rail, the brownout detector cleanly resets and the device comes back at HIGH.
 #ifndef JAMMER_PA_LEVEL
-#define JAMMER_PA_LEVEL RF24_PA_MAX
+#define JAMMER_PA_LEVEL RF24_PA_HIGH
 #endif
 
-// Scoped brownout-detector control: kill the reset while the high-current jammer
-// runs, restore normal protection afterwards (so SD writes etc. stay protected).
-#include "soc/rtc_cntl_reg.h"
-static uint32_t s_jamBrownSaved = 0;
-static bool s_jamBrownOff = false;
-static inline void jammerSetBrownout(bool enabled) {
-  if (!enabled && !s_jamBrownOff) {
-    s_jamBrownSaved = READ_PERI_REG(RTC_CNTL_BROWN_OUT_REG);
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // disable brownout reset
-    s_jamBrownOff = true;
-  } else if (enabled && s_jamBrownOff) {
-    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, s_jamBrownSaved);  // restore
-    s_jamBrownOff = false;
+// Runtime jammer TX power, shared by both jammers; cycled by the Proto Kill UI.
+static rf24_pa_dbm_e g_jammerPa = (rf24_pa_dbm_e)JAMMER_PA_LEVEL;
+static const char *jammerPaName() {
+  switch (g_jammerPa) {
+    case RF24_PA_MIN:  return "MIN";
+    case RF24_PA_LOW:  return "LOW";
+    case RF24_PA_HIGH: return "HIGH";
+    case RF24_PA_MAX:  return "MAX";
+    default:           return "?";
   }
+}
+static void jammerCyclePa() {  // LOW -> HIGH -> MAX -> LOW
+  if (g_jammerPa == RF24_PA_LOW)       g_jammerPa = RF24_PA_HIGH;
+  else if (g_jammerPa == RF24_PA_HIGH) g_jammerPa = RF24_PA_MAX;
+  else                                 g_jammerPa = RF24_PA_LOW;
 }
 
 #ifndef FEATURE_TEXT
@@ -88,7 +92,7 @@ static void bleSetExitOnlyNavLabels() {
 }
 
 static void bleSetJammerNavLabels() {
-  setTouchNavLabels("Mode-", nullptr, "Exit", "Toggle", "Mode+");
+  setTouchNavLabels("Mode-", "Power", "Exit", "Toggle", "Mode+");
 }
 
 static void bleSetScannerNavLabels() {
@@ -1276,7 +1280,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setAutoAck(false);
   radio.stopListening();
   radio.setRetries(0, 0);
-  radio.setPALevel(JAMMER_PA_LEVEL, true);
+  radio.setPALevel(g_jammerPa, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
   // NOTE: printPrettyDetails() removed — it blasts dozens of blocking Serial lines on
@@ -1284,7 +1288,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
 
   for (size_t i = 0; i < size; i++) {
     radio.setChannel(channels[i]);
-    radio.startConstCarrier(JAMMER_PA_LEVEL, channels[i]);
+    radio.startConstCarrier(g_jammerPa, channels[i]);
   }
 }
 
@@ -1304,14 +1308,12 @@ void initializeRadiosMultiMode() {
 
 void initializeRadios() {
   if (jammerActive) {
-    jammerSetBrownout(false);  // high TX current sags the rail; don't reset on it
     initializeRadiosMultiMode();
 
   } else {
     radio1.powerDown();
     radio2.powerDown();
     radio3.powerDown();
-    jammerSetBrownout(true);   // restore normal brownout protection
   }
 }
 
@@ -1334,8 +1336,11 @@ void updateTFT() {
     const unsigned char* icon;
   };
 
+  static char powBuf[16];
+  snprintf(powBuf, sizeof(powBuf), "%s %s", jammerActive ? "ON" : "OFF", jammerPaName());
+
   ButtonGuide buttons[] = {
-    {jammerActive ? "[ON]" : "[OFF]", bitmap_icon_UP},
+    {powBuf, bitmap_icon_UP},        // toggle (UP) + current TX power level
     {"MODE-", bitmap_icon_LEFT},
     {"MODE+", bitmap_icon_RIGHT}
   };
@@ -3058,6 +3063,7 @@ int Index = 0;
 volatile bool modeChangeRequested = false;
 volatile bool modeChangeRequested1 = false;
 volatile bool jammerToggleRequested = false;
+volatile bool paChangeRequested = false;
 
 static constexpr int kProkillLogTop = 48;
 
@@ -3133,6 +3139,10 @@ void prokillHandleNavButtons() {
     jammerToggleRequested = true;
     bleWaitButtonRelease(BTN_UP);
   }
+  if (isButtonPressedEdge(BTN_DOWN)) {
+    paChangeRequested = true;  // cycle TX power LOW->HIGH->MAX
+    bleWaitButtonRelease(BTN_DOWN);
+  }
   if (isButtonPressedEdge(BTN_RIGHT)) {
     modeChangeRequested = true;
     bleWaitButtonRelease(BTN_RIGHT);
@@ -3158,7 +3168,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
   radio.setAutoAck(false);
   radio.stopListening();
   radio.setRetries(0, 0);
-  radio.setPALevel(JAMMER_PA_LEVEL, true);
+  radio.setPALevel(g_jammerPa, true);
   radio.setDataRate(RF24_2MBPS);
   radio.setCRCLength(RF24_CRC_DISABLED);
   // NOTE: printPrettyDetails() removed — it blasts dozens of blocking Serial lines on
@@ -3166,7 +3176,7 @@ void configureRadio(RF24 &radio, const byte* channels, size_t size) {
 
   for (size_t i = 0; i < size; i++) {
     radio.setChannel(channels[i]);
-    radio.startConstCarrier(JAMMER_PA_LEVEL, channels[i]);
+    radio.startConstCarrier(g_jammerPa, channels[i]);
   }
 }
 
@@ -3186,14 +3196,12 @@ void initializeRadiosMultiMode() {
 
 void initializeRadios() {
   if (jammerActive) {
-    jammerSetBrownout(false);  // high TX current sags the rail; don't reset on it
     initializeRadiosMultiMode();
 
   } else {
     radio1.powerDown();
     radio2.powerDown();
     radio3.powerDown();
-    jammerSetBrownout(true);   // restore normal brownout protection
   }
 }
 
@@ -3207,8 +3215,11 @@ void updateTFT() {
     const unsigned char* icon;
   };
 
+  static char powBuf[16];
+  snprintf(powBuf, sizeof(powBuf), "%s %s", jammerActive ? "ON" : "OFF", jammerPaName());
+
   ButtonGuide buttons[] = {
-    {jammerActive ? "[ON]" : "[OFF]", bitmap_icon_UP},
+    {powBuf, bitmap_icon_UP},        // toggle (UP) + current TX power level
     {"MODE-", bitmap_icon_LEFT},
     {"MODE+", bitmap_icon_RIGHT}
   };
@@ -3284,6 +3295,16 @@ void checkModeChange() {
     initializeRadios();
     updateTFT();
     printJammerStatus(jammerActive);
+  }
+
+  if (paChangeRequested) {
+    paChangeRequested = false;
+    jammerCyclePa();
+    if (jammerActive) initializeRadios();  // re-arm radios at the new power level
+    updateTFT();
+    String t = "[*] TX power: ";
+    t += jammerPaName();
+    Print(t, UI_WARN, false);
   }
 }
 
