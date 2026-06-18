@@ -2864,6 +2864,7 @@ void loop() {
 
 namespace TouchCalib {
 static int stepIdx = 0;
+static bool waitRelease = false;   // require finger lift between calibration points
 static uint16_t xs[4], ys[4];
 static const int pts[4][2] = { {20,20}, {TFT_WIDTH-20,20}, {TFT_WIDTH-20,TFT_HEIGHT-20}, {20,TFT_HEIGHT-20} };
 
@@ -2879,6 +2880,7 @@ static void drawTarget(int x,int y){
 
 void setup(){
   stepIdx=0;
+  waitRelease=false;
   drawTarget(pts[0][0], pts[0][1]);
 }
 
@@ -2913,12 +2915,29 @@ void loop(){
   }
 
   int16_t rx = 0, ry = 0;
-  if (readTouchRawXY(rx, ry)) {
-    xs[stepIdx] = (uint16_t)rx;
-    ys[stepIdx] = (uint16_t)ry;
-    stepIdx++;
-    if (stepIdx<4) drawTarget(pts[stepIdx][0], pts[stepIdx][1]);
+  const bool down = readTouchRawXY(rx, ry);
+
+  // Require the finger to lift between targets — otherwise one continuous press blasts
+  // through all four points in 4 loop iterations, giving a degenerate calibration (#161).
+  if (waitRelease) {
+    if (!down) waitRelease = false;
+    delay(20);
+    return;
   }
-  delay(100);
+  if (down) {
+    // average a few samples for a steadier point
+    int32_t ax = rx, ay = ry; int n = 1;
+    for (int k = 0; k < 4; k++) {
+      delay(8);
+      int16_t sx, sy;
+      if (readTouchRawXY(sx, sy)) { ax += sx; ay += sy; n++; }
+    }
+    xs[stepIdx] = (uint16_t)(ax / n);
+    ys[stepIdx] = (uint16_t)(ay / n);
+    stepIdx++;
+    waitRelease = true;
+    if (stepIdx < 4) drawTarget(pts[stepIdx][0], pts[stepIdx][1]);
+  }
+  delay(30);
 }
 }
