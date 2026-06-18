@@ -16,6 +16,8 @@
 #include "ProbeSniffer.h"
 #include "TrackerScanner.h"
 #include "TVBGone.h"
+#include "KarmaAttack.h"
+#include "EvilPortal.h"
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -88,12 +90,14 @@ const char *subghz_submenu_items[subghz_NUM_SUBMENU_ITEMS] = {
     "Saved Profile",
     "Back to Main Menu"};
 
-const int tools_NUM_SUBMENU_ITEMS = 5;
+const int tools_NUM_SUBMENU_ITEMS = 7;
 const char *tools_submenu_items[tools_NUM_SUBMENU_ITEMS] = {
     "Serial Monitor",
     "Update Firmware",
     "Touch Calibrate",
     "SD File Manager",
+    "WiFi Karma",
+    "Evil Portal",
     "Back to Main Menu"};
 
 static constexpr uint8_t OTHER_LAYER_HOME = 0;
@@ -194,6 +198,8 @@ const unsigned char *tools_submenu_icons[tools_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_follow,
     bitmap_icon_undo,
     bitmap_icon_sdcard,
+    bitmap_icon_antenna,
+    bitmap_icon_eye2,
     bitmap_icon_go_back
 };
 
@@ -2517,8 +2523,10 @@ constexpr int TOOLS_IDX_TERMINAL = 0;
 constexpr int TOOLS_IDX_UPDATE   = 1;
 constexpr int TOOLS_IDX_TOUCH    = 2;
 constexpr int TOOLS_IDX_SD_FILES = 3;
+constexpr int TOOLS_IDX_KARMA    = 4;
+constexpr int TOOLS_IDX_EVIL     = 5;
 constexpr int TOOLS_IDX_SETTINGS = -1;
-constexpr int TOOLS_IDX_BACK     = 4;
+constexpr int TOOLS_IDX_BACK     = 6;
 
 static void runToolsFeatureExitCleanup() {
     in_sub_menu = true;
@@ -2572,6 +2580,22 @@ static void launchToolsFeature(int idx) {
             break;
         case TOOLS_IDX_SD_FILES:
             runToolsFeature(idx, SdFileManager::setup, SdFileManager::loop);
+            break;
+        case TOOLS_IDX_KARMA:
+            current_submenu_index = idx;
+            in_sub_menu = true;
+            feature_active = true;
+            feature_exit_requested = false;
+            KarmaAttack::run();
+            runToolsFeatureExitCleanup();
+            break;
+        case TOOLS_IDX_EVIL:
+            current_submenu_index = idx;
+            in_sub_menu = true;
+            feature_active = true;
+            feature_exit_requested = false;
+            EvilPortal::run();
+            runToolsFeatureExitCleanup();
             break;
         default:
             break;
