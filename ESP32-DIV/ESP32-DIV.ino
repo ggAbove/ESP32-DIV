@@ -13,6 +13,7 @@
 #include "shared.h"
 #include "utils.h"
 #include "Pwnagotchi.h"
+#include "ProbeSniffer.h"
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -48,7 +49,7 @@ const unsigned char *bitmap_icons[NUM_MENU_ITEMS] = {
 int current_menu_index = 0;
 bool is_main_menu = false;
 
-const int NUM_SUBMENU_ITEMS = 9;
+const int NUM_SUBMENU_ITEMS = 10;
 const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Packet Monitor",
     "Beacon Spammer",
@@ -58,6 +59,7 @@ const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "WiFi Scanner",
     "Captive Portal",
     "Pwnagotchi",
+    "Probe Sniffer",
     "Back to Main Menu"};
 
 const int bluetooth_NUM_SUBMENU_ITEMS = 7;
@@ -155,6 +157,7 @@ const unsigned char *wifi_submenu_icons[NUM_SUBMENU_ITEMS] = {
     bitmap_icon_jammer,
     bitmap_icon_bash,
     bitmap_icon_eye2,
+    bitmap_icon_antenna,
     bitmap_icon_go_back
 };
 
@@ -1045,7 +1048,7 @@ void handleWiFiSubmenuButtons() {
         last_interaction_time = millis();
         delay(70);
 
-        if (current_submenu_index == 8) {
+        if (current_submenu_index == 9) {
             in_sub_menu = false;
             feature_active = false;
             feature_exit_requested = false;
@@ -1054,11 +1057,12 @@ void handleWiFiSubmenuButtons() {
             is_main_menu = false;
         }
 
-        if (current_submenu_index == 7) {  // Pwnagotchi
+        if (current_submenu_index == 7 || current_submenu_index == 8) {  // Pwnagotchi / Probe Sniffer
             in_sub_menu = true;
             feature_active = true;
             feature_exit_requested = false;
-            Pwnagotchi::run();
+            if (current_submenu_index == 7) Pwnagotchi::run();
+            else ProbeSniffer::run();
             in_sub_menu = true;
             is_main_menu = false;
             submenu_initialized = false;
@@ -1327,18 +1331,19 @@ void handleWiFiSubmenuButtons() {
                 displaySubmenu();
                 delay(200);
 
-                if (current_submenu_index == 8) {
+                if (current_submenu_index == 9) {
                     in_sub_menu = false;
                     feature_active = false;
                     feature_exit_requested = false;
                     displayMenu();
                     handleButtons();
                     is_main_menu = false;
-                } else if (current_submenu_index == 7) {  // Pwnagotchi
+                } else if (current_submenu_index == 7 || current_submenu_index == 8) {  // Pwnagotchi / Probe Sniffer
                     in_sub_menu = true;
                     feature_active = true;
                     feature_exit_requested = false;
-                    Pwnagotchi::run();
+                    if (current_submenu_index == 7) Pwnagotchi::run();
+                    else ProbeSniffer::run();
                     in_sub_menu = true;
                     is_main_menu = false;
                     submenu_initialized = false;
