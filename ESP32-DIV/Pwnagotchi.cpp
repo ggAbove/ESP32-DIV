@@ -12,6 +12,8 @@
 #include "Pwnagotchi.h"
 #include <SD.h>
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 extern TFT_eSPI tft;
 extern bool feature_exit_requested;
@@ -35,6 +37,14 @@ static uint8_t  s_bssidCount = 0;
 // SD pcap
 static File     s_pcap;
 static bool     s_pcapOpen = false;
+
+// Captured frames are copied into this queue from the Wi-Fi promiscuous callback and
+// written to SD only from run()'s main loop — never do SD/SPI I/O in the callback.
+struct PwnFrame { uint16_t len; uint8_t buf[256]; };
+static QueueHandle_t s_frameQ = nullptr;
+// Set true while deauthBurst() switches the radio mode, so the callback (which may
+// still be in flight on the Wi-Fi task) leaves the BSSID table / state alone.
+static volatile bool s_paused = false;
 
 // ---- pcap (DLT_IEEE802_11 = 105, no radiotap) ----
 static void pcapWriteGlobalHeader() {
@@ -62,6 +72,7 @@ static void learnBssid(const uint8_t* b, uint8_t chan) {
 static void IRAM_ATTR snifferCb(void* buf, wifi_promiscuous_pkt_type_t type) {
   const wifi_promiscuous_pkt_t* p = (const wifi_promiscuous_pkt_t*)buf;
   const uint8_t* fr = p->payload;
+  if (s_paused) return;                       // radio mid mode-switch (deauthBurst)
   const int len = p->rx_ctrl.sig_len;
   if (len < 24) return;
   s_packets++;
@@ -85,7 +96,13 @@ static void IRAM_ATTR snifferCb(void* buf, wifi_promiscuous_pkt_type_t type) {
   if (!(llc[6] == 0x88 && llc[7] == 0x8E)) return;   // EAPOL ethertype
 
   s_eapol++;
-  pcapWriteFrame(fr, len);
+  // hand the frame to the main loop for SD writing (no SD I/O in this callback)
+  if (s_frameQ && len <= (int)sizeof(((PwnFrame*)0)->buf)) {
+    PwnFrame f;
+    f.len = (uint16_t)len;
+    memcpy(f.buf, fr, len);
+    xQueueSend(s_frameQ, &f, 0);  // non-blocking; drop if the queue is full
+  }
 
   // crude PMKID heuristic: EAPOL-Key (type 3) with an RSN PMKID KDE
   // (00 0F AC 04) somewhere in the key data — present in M1 from the AP.
@@ -106,8 +123,11 @@ static void IRAM_ATTR snifferCb(void* buf, wifi_promiscuous_pkt_type_t type) {
 // to STA for the burst, then restore NULL + promiscuous. Only targets APs we learned
 // on the current channel (a deauth only reaches its AP's channel).
 static void deauthBurst() {
-  if (s_bssidCount == 0) return;
+  const uint8_t cnt = s_bssidCount;  // snapshot before pausing the learner
+  if (cnt == 0) return;
 
+  s_paused = true;                   // freeze the callback during the mode switch
+  delay(2);                          // let any in-flight callback drain
   esp_wifi_set_promiscuous(false);
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_start();
@@ -120,7 +140,7 @@ static void deauthBurst() {
       0,0,0,0,0,0,                                    // bssid
       0x00, 0x00,                                     // seq
       0x07, 0x00 };                                   // reason: class-3 from non-assoc
-  for (uint8_t i = 0; i < s_bssidCount; i++) {
+  for (uint8_t i = 0; i < cnt; i++) {
     if (s_bssidChan[i] != s_channel) continue;
     memcpy(pkt + 10, s_bssids[i], 6);
     memcpy(pkt + 16, s_bssids[i], 6);
@@ -135,6 +155,7 @@ static void deauthBurst() {
   esp_wifi_set_mode(WIFI_MODE_NULL);
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_channel(s_channel, WIFI_SECOND_CHAN_NONE);
+  s_paused = false;
 }
 
 // ---- mascot: a cute WiFi pet with Duolingo-style moods + speech ----
@@ -279,6 +300,8 @@ void run() {
   s_eapol = s_pmkid = s_packets = s_deauths = 0;
   s_bssidCount = 0;
   s_channel = 1;
+  s_paused = false;
+  s_frameQ = xQueueCreate(12, sizeof(PwnFrame));
 
   tft.fillScreen(UI_BG);
   tft.setTextColor(UI_DIM_TEXT, UI_BG);
@@ -324,6 +347,12 @@ void run() {
   while (!feature_exit_requested && !featureExitButtonPressed()) {
     uint32_t now = millis();
 
+    // drain captured frames to SD here, on the main task (never in the callback)
+    if (s_frameQ && s_pcapOpen) {
+      PwnFrame f;
+      while (xQueueReceive(s_frameQ, &f, 0) == pdTRUE) pcapWriteFrame(f.buf, f.len);
+    }
+
     // channel hop every 1.2s across 1..13
     if (now - lastHop > 1200) {
       s_channel = (s_channel % 13) + 1;
@@ -361,7 +390,21 @@ void run() {
     delay(10);
   }
 
+  // Tear down cleanly: stop promiscuous, CLEAR the rx callback (else a stale pointer to
+  // snifferCb can fire when another feature re-enables promiscuous -> use-after-free on
+  // the closed pcap), restore a defined mode, drain + free the queue, close the file.
+  s_paused = true;
   esp_wifi_set_promiscuous(false);
+  esp_wifi_set_promiscuous_rx_cb(nullptr);
+  esp_wifi_set_mode(WIFI_MODE_STA);
+  if (s_frameQ) {
+    if (s_pcapOpen) {
+      PwnFrame f;
+      while (xQueueReceive(s_frameQ, &f, 0) == pdTRUE) pcapWriteFrame(f.buf, f.len);
+    }
+    vQueueDelete(s_frameQ);
+    s_frameQ = nullptr;
+  }
   if (s_pcapOpen) { s_pcap.flush(); s_pcap.close(); s_pcapOpen = false; }
   Serial.printf("[pwn] stopped: eapol=%lu pmkid=%lu\n", (unsigned long)s_eapol,
                 (unsigned long)s_pmkid);
