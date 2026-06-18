@@ -40,6 +40,10 @@
 #include "shared.h"
 
 using namespace std;
+// Newer arduino-esp32 / libstdc++ expose std::byte; combined with `using namespace
+// std` that makes the Arduino `byte` (uint8_t) ambiguous at every use site. An
+// explicit global typedef wins over the using-directive and restores Arduino `byte`.
+typedef uint8_t byte;
 
 /* ───────────── Common externs ───────────── */
 extern TFT_eSPI tft;
