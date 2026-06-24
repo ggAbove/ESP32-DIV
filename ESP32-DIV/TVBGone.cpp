@@ -63,6 +63,7 @@ static void sendOne(const Code &c) {
 void run() {
   Serial.println("[tvbgone] start");
   feature_active = true;  // REQUIRED: touch-nav SELECT only registers when active
+  setTouchButtonInputEnabled(true);  // enable touch SELECT slot for touch-only exit
   feature_exit_requested = false;
   s_ir.begin();
   tft.fillScreen(UI_BG);

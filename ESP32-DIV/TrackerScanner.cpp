@@ -98,6 +98,7 @@ static void draw(bool scanning) {
 
 void run() {
   feature_active = true;  // touch-nav SELECT (isTouchNavSlotDown) needs this set
+  setTouchButtonInputEnabled(true);  // enable touch SELECT slot so touch-only users can exit
   feature_exit_requested = false;
   pauseBackgroundRadioTasks();
   s_count = 0;
@@ -118,7 +119,7 @@ void run() {
 
   while (!feature_exit_requested && !featureExitButtonPressed()) {
     draw(true);
-    BLEScanResults res = scan->start(3, false);
+    BLEScanResults res = scan->start(1, false);  // 1s scan -> exit polled far more often
     for (int i = 0; i < res.getCount(); i++) {
       BLEAdvertisedDevice d = res.getDevice(i);
       const char *type = classify(d);
@@ -130,13 +131,14 @@ void run() {
     scan->clearResults();
     draw(false);
     Serial.printf("[tracker] %d found, heap=%u\n", s_count, ESP.getFreeHeap());
-    // brief responsive wait for exit
-    for (int k = 0; k < 30 && !feature_exit_requested && !featureExitButtonPressed(); k++) delay(10);
+    // responsive exit poll (~1.2s) — featureExitButtonPressed force-reads the PCF now
+    for (int k = 0; k < 40 && !feature_exit_requested && !featureExitButtonPressed(); k++) delay(30);
   }
 
   scan->stop();
   scan->clearResults();
   if (s_csvOpen) { s_csv.flush(); s_csv.close(); s_csvOpen = false; }
+  setTouchButtonInputEnabled(false);
   Serial.printf("[tracker] stopped: %d trackers\n", s_count);
 }
 

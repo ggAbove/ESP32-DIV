@@ -510,6 +510,7 @@ void run() {
 
     // --- launch portal ---
     feature_active     = true;
+    setTouchButtonInputEnabled(true);  // enable touch SELECT slot for touch-only exit
     s_captured         = 0;
     s_hits             = 0;
     s_dirty            = true;

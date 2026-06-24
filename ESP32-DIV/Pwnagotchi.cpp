@@ -295,6 +295,7 @@ static void drawStats() {
 
 void run() {
   feature_active = true;  // touch-nav SELECT (isTouchNavSlotDown) needs this set
+  setTouchButtonInputEnabled(true);  // enable touch SELECT slot for touch-only exit
   feature_exit_requested = false;
   // Stop the boot WiFi/BLE background scanners — they periodically re-scan and
   // clobber our promiscuous mode (without this the sniffer sees 0 packets).

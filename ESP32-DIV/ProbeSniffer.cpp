@@ -127,6 +127,7 @@ static void draw() {
 
 void run() {
   feature_active = true;  // touch-nav SELECT (isTouchNavSlotDown) needs this set
+  setTouchButtonInputEnabled(true);  // enable touch SELECT slot for touch-only exit
   feature_exit_requested = false;
   pauseBackgroundRadioTasks();
   s_total = 0;

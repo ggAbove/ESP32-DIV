@@ -17,6 +17,8 @@
 #include "Pwnagotchi.h"
 #include "ProbeSniffer.h"
 #include "TrackerScanner.h"
+#include "RaybanDetector.h"
+#include "FlockDetector.h"
 #include "TVBGone.h"
 #include "KarmaAttack.h"
 #include "EvilPortal.h"
@@ -68,7 +70,7 @@ const char *submenu_items[NUM_SUBMENU_ITEMS] = {
     "Probe Sniffer",
     "Back to Main Menu"};
 
-const int bluetooth_NUM_SUBMENU_ITEMS = 8;
+const int bluetooth_NUM_SUBMENU_ITEMS = 10;
 const char *bluetooth_submenu_items[bluetooth_NUM_SUBMENU_ITEMS] = {
     "BLE Jammer",
     "BLE Spoofer",
@@ -77,6 +79,8 @@ const char *bluetooth_submenu_items[bluetooth_NUM_SUBMENU_ITEMS] = {
     "BLE Scanner",
     "BLE Rubber Ducky",
     "Tracker Scan",
+    "RayBan Detect",
+    "Flock Detect",
     "Back to Main Menu"};
 
 const int nrf_NUM_SUBMENU_ITEMS = 3;
@@ -179,6 +183,8 @@ const unsigned char *bluetooth_submenu_icons[bluetooth_NUM_SUBMENU_ITEMS] = {
     bitmap_icon_graph,
     bitmap_icon_rubber_ducky,
     bitmap_icon_ble,
+    bitmap_icon_ble,        // RayBan Detect (idx7)
+    bitmap_icon_analyzer,   // Flock Detect (idx8)
     bitmap_icon_go_back
 };
 
@@ -728,7 +734,14 @@ bool isButtonPressedEdge(int buttonPin) {
 }
 
 bool featureExitButtonPressed() {
-  return isPhysicalButtonPressed(BTN_SELECT) || isTouchNavButtonPressed(BTN_SELECT);
+  // Features run a self-contained loop that BLOCKS loop()/handleButtons(), so the
+  // PCF8574 driver's cached/latency-gated digitalRead goes stale (returns "released"
+  // forever). Force a fresh I2C read here so the physical SELECT key still exits.
+  if (bySawSerialBtnDown(BTN_SELECT)) return true;
+#if HAS_PCF8574_BUTTONS
+  if (getPcf8574Address() != 0 && pcf.digitalRead(BTN_SELECT, true) == LOW) return true;
+#endif
+  return isTouchNavButtonPressed(BTN_SELECT);
 }
 
 static void showFeatureUnavailable(const char* featureName, const char* requirement) {
@@ -1630,7 +1643,7 @@ void handleBluetoothSubmenuButtons() {
         last_interaction_time = millis();
         delay(200);
 
-        if (current_submenu_index == 7) {  // Back (last item)
+        if (current_submenu_index == 9) {  // Back (last item)
             in_sub_menu = false;
             feature_active = false;
             feature_exit_requested = false;
@@ -1645,6 +1658,38 @@ void handleBluetoothSubmenuButtons() {
             feature_active = true;
             feature_exit_requested = false;
             TrackerScanner::run();
+            in_sub_menu = true;
+            is_main_menu = false;
+            submenu_initialized = false;
+            feature_active = false;
+            feature_exit_requested = false;
+            displaySubmenu();
+            delay(200);
+            while (isButtonPressed(BTN_SELECT)) {
+            }
+        }
+
+        if (current_submenu_index == 7) {  // RayBan Meta Detect
+            in_sub_menu = true;
+            feature_active = true;
+            feature_exit_requested = false;
+            RaybanDetector::run();
+            in_sub_menu = true;
+            is_main_menu = false;
+            submenu_initialized = false;
+            feature_active = false;
+            feature_exit_requested = false;
+            displaySubmenu();
+            delay(200);
+            while (isButtonPressed(BTN_SELECT)) {
+            }
+        }
+
+        if (current_submenu_index == 8) {  // Flock Detect
+            in_sub_menu = true;
+            feature_active = true;
+            feature_exit_requested = false;
+            FlockDetector::run();
             in_sub_menu = true;
             is_main_menu = false;
             submenu_initialized = false;
@@ -1858,7 +1903,7 @@ void handleBluetoothSubmenuButtons() {
                 displaySubmenu();
                 delay(200);
 
-                if (current_submenu_index == 7) {  // Back (last item)
+                if (current_submenu_index == 9) {  // Back (last item)
                     in_sub_menu = false;
                     feature_active = false;
                     feature_exit_requested = false;
@@ -1870,6 +1915,30 @@ void handleBluetoothSubmenuButtons() {
                     feature_active = true;
                     feature_exit_requested = false;
                     TrackerScanner::run();
+                    in_sub_menu = true;
+                    is_main_menu = false;
+                    submenu_initialized = false;
+                    feature_active = false;
+                    feature_exit_requested = false;
+                    displaySubmenu();
+                    delay(200);
+                } else if (current_submenu_index == 7) {  // RayBan Meta Detect
+                    in_sub_menu = true;
+                    feature_active = true;
+                    feature_exit_requested = false;
+                    RaybanDetector::run();
+                    in_sub_menu = true;
+                    is_main_menu = false;
+                    submenu_initialized = false;
+                    feature_active = false;
+                    feature_exit_requested = false;
+                    displaySubmenu();
+                    delay(200);
+                } else if (current_submenu_index == 8) {  // Flock Detect
+                    in_sub_menu = true;
+                    feature_active = true;
+                    feature_exit_requested = false;
+                    FlockDetector::run();
                     in_sub_menu = true;
                     is_main_menu = false;
                     submenu_initialized = false;
